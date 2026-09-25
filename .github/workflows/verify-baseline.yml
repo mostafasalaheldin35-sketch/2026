@@ -1,0 +1,39 @@
+name: Verify Sokhna Port 2026 baseline
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'Sokhna-Port-2026-Approved-Baseline.zip'
+      - 'build/**'
+      - 'tests/**'
+      - '.github/workflows/verify-baseline.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify and reconstruct approved baseline
+        run: python build/prepare_source.py
+      - name: Desktop-only baseline QA
+        run: python tests/test_baseline.py
+      - name: Python backend syntax
+        run: python -m py_compile buildsrc/backend.py
+      - name: Upload verified reconstructed source
+        uses: actions/upload-artifact@v4
+        with:
+          name: Sokhna-Port-2026-Verified-Baseline-Source
+          path: |
+            buildsrc/backend.py
+            buildsrc/launcher.py
+            buildsrc/app/index.html
+            buildsrc/app/manifest.json
+          if-no-files-found: error
+          retention-days: 7
