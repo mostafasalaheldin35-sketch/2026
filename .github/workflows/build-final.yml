@@ -11,6 +11,7 @@ on:
       - 'build/v4172_*.b64'
       - 'build/v4173-final-scripts.b64'
       - 'build/v4174_*.b64'
+      - 'build/apply_v4174_cli_root_fix.py'
       - '.github/workflows/build-final.yml'
 
 permissions:
@@ -127,6 +128,8 @@ jobs:
           $ErrorActionPreference='Stop'
           python build/apply_v4174.py
           if($LASTEXITCODE -ne 0){throw 'apply_v4174.py failed'}
+          python build/apply_v4174_cli_root_fix.py
+          if($LASTEXITCODE -ne 0){throw 'apply_v4174_cli_root_fix.py failed'}
 
       - name: Final v4.8.17.4 QA
         shell: pwsh
