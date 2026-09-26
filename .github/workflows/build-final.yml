@@ -67,7 +67,7 @@ jobs:
           '@ | Set-Content -Encoding UTF8 build/extract_inline.py
           python build/extract_inline.py
           node --check buildsrc/app_check.js
-          python build/test_v2026.py
+          python build/test_review_fix.py
 
       - name: Install PyInstaller
         run: python -m pip install --disable-pip-version-check pyinstaller
