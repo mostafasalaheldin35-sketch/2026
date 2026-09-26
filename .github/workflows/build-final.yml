@@ -103,10 +103,10 @@ jobs:
           @'
           import base64, hashlib
           from pathlib import Path
-          encoded=Path('build/v4173-final-scripts.b64').read_text(encoding='utf-8').strip()
+          encoded=''.join(Path('build/v4173-final-scripts.b64').read_text(encoding='utf-8').split())
           raw=base64.b64decode(encoded, validate=True)
           digest=hashlib.sha256(raw).hexdigest()
-          expected='0b064552b12e58d79cad88fa611d679a409a2116112b822d45de62384dcdf4b1'
+          expected='3b39978aa97fa0e41888756a68032f3c93f5943f8eda2d79b03d05dc9cb132cd'
           if digest != expected:
               raise SystemExit(f'v4.8.17.3 scripts bundle SHA mismatch: {digest}')
           Path('build/v4173-final-scripts.tgz').write_bytes(raw)
