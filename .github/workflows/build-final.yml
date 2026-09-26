@@ -5,7 +5,7 @@ on:
   push:
     paths:
       - 'Sokhna-Port-2026-Approved-Baseline.zip'
-      - 'build/bundle_*.b64'
+      - 'Sokhna-Port-2026-Changes-Bundle.tgz'
       - 'build/prepare_source.py'
       - '.github/workflows/build-final.yml'
 
@@ -25,36 +25,10 @@ jobs:
       - name: Reconstruct verified modification bundle
         shell: pwsh
         run: |
-          @'
-          import base64, io, tarfile
-          from pathlib import Path
-          parts=[Path(f'build/bundle_{i:02d}.b64').read_text().strip() for i in range(3)]
-          joined=''.join(parts)
-          def valid(candidate):
-              try:
-                  raw=base64.b64decode(candidate,validate=True)
-                  with tarfile.open(fileobj=io.BytesIO(raw),mode='r:gz') as t:
-                      names=set(t.getnames())
-                      if {'apply_v2026.py','v2026_patch.js','test_v2026.py'} <= names:
-                          Path('v2026_bundle.tgz').write_bytes(raw)
-                          return True
-              except Exception:
-                  return False
-              return False
-          if not valid(joined):
-              p=parts[1]
-              fixed=False
-              for i in range(len(p)):
-                  candidate=parts[0]+p[:i]+p[i+1:]+parts[2]
-                  if valid(candidate):
-                      fixed=True
-                      print('Recovered bundle by removing one transport character at offset',i)
-                      break
-              if not fixed:
-                  raise SystemExit('Unable to reconstruct verified modification bundle')
-          '@ | Set-Content -Encoding UTF8 build/recover_bundle.py
-          python build/recover_bundle.py
-          tar -xzf v2026_bundle.tgz -C build
+          if(-not(Test-Path 'Sokhna-Port-2026-Changes-Bundle.tgz')){throw 'Missing Sokhna-Port-2026-Changes-Bundle.tgz'}
+          $hash=(Get-FileHash 'Sokhna-Port-2026-Changes-Bundle.tgz' -Algorithm SHA256).Hash.ToLower()
+          if($hash -ne '483aa71577769542ce3d88b1ba8bc1c56ba3ce2e025c90e857c65fb825819570'){throw "Changes bundle SHA mismatch: $hash"}
+          tar -xzf 'Sokhna-Port-2026-Changes-Bundle.tgz' -C build
           if(-not(Test-Path 'build/apply_v2026.py')){throw 'Modification bundle extraction failed'}
 
       - name: Verify approved baseline
