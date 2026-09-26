@@ -48,7 +48,7 @@ jobs:
         run: |
           python -m py_compile buildsrc/backend.py buildsrc/launcher.py
           node --check buildsrc/app/v2026_patch.js
-          python build/test_review_fix.py
+          python build/test_v2026.py
 
       - name: Apply reviewed corrections
         run: python build/apply_review_fix.py
