@@ -106,7 +106,7 @@ jobs:
           encoded=''.join(Path('build/v4173-final-scripts.b64').read_text(encoding='utf-8').split())
           raw=base64.b64decode(encoded, validate=True)
           digest=hashlib.sha256(raw).hexdigest()
-          expected='3aa7cb2ad884365b087c9bf68db562a85dd880ae2289455906854d6ebbd51767'
+          expected='a4dc76e589ac4ba29e8aac7b2160091d9263fedf1eca6b71617617417b47358a'
           if digest != expected:
               raise SystemExit(f'v4.8.17.3 scripts bundle SHA mismatch: {digest}')
           Path('build/v4173-final-scripts.tgz').write_bytes(raw)
@@ -114,18 +114,15 @@ jobs:
           '@ | Set-Content -Encoding UTF8 build/reconstruct_v4173.py
           python build/reconstruct_v4173.py
           tar -xzf 'build/v4173-final-scripts.tgz' -C build
-          if(-not(Test-Path 'build/apply_v4173.py')){throw 'apply_v4173.py missing'}
-          if(-not(Test-Path 'build/finalize_v4173.py')){throw 'finalize_v4173.py missing'}
+          if(-not(Test-Path 'build/apply_final_v4173.py')){throw 'apply_final_v4173.py missing'}
           if(-not(Test-Path 'build/test_master_pass.py')){throw 'test_master_pass.py missing'}
 
       - name: Apply final reviewed v4.8.17.3 changes
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
-          python build/apply_v4173.py
-          if($LASTEXITCODE -ne 0){throw 'apply_v4173.py failed'}
-          python build/finalize_v4173.py
-          if($LASTEXITCODE -ne 0){throw 'finalize_v4173.py failed'}
+          python build/apply_final_v4173.py
+          if($LASTEXITCODE -ne 0){throw 'apply_final_v4173.py failed'}
 
       - name: Final v4.8.17.3 QA
         shell: pwsh
