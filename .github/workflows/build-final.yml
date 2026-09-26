@@ -6,6 +6,7 @@ on:
     paths:
       - 'Sokhna-Port-2026-Approved-Baseline.zip'
       - 'Sokhna-Port-2026-Changes-Bundle.tgz'
+      - 'Sokhna-Port-2026-Review-Fix.tgz'
       - 'build/prepare_source.py'
       - '.github/workflows/build-final.yml'
 
@@ -30,12 +31,27 @@ jobs:
           if($hash -ne '483aa71577769542ce3d88b1ba8bc1c56ba3ce2e025c90e857c65fb825819570'){throw "Changes bundle SHA mismatch: $hash"}
           tar -xzf 'Sokhna-Port-2026-Changes-Bundle.tgz' -C build
           if(-not(Test-Path 'build/apply_v2026.py')){throw 'Modification bundle extraction failed'}
+          if(-not(Test-Path 'Sokhna-Port-2026-Review-Fix.tgz')){throw 'Missing Sokhna-Port-2026-Review-Fix.tgz'}
+          $reviewHash=(Get-FileHash 'Sokhna-Port-2026-Review-Fix.tgz' -Algorithm SHA256).Hash.ToLower()
+          if($reviewHash -ne '0442584bb65cc2bb8ce5dda212337d842382758973b0d405224577b9c802b368'){throw "Review bundle SHA mismatch: $reviewHash"}
+          tar -xzf 'Sokhna-Port-2026-Review-Fix.tgz' -C build
+          if(-not(Test-Path 'build/apply_review_fix.py')){throw 'Review bundle extraction failed'}
 
       - name: Verify approved baseline
         run: python build/prepare_source.py
 
       - name: Apply all approved 2026 changes
         run: python build/apply_v2026.py
+
+      - name: Verify first-pass changes
+        shell: pwsh
+        run: |
+          python -m py_compile buildsrc/backend.py buildsrc/launcher.py
+          node --check buildsrc/app/v2026_patch.js
+          python build/test_review_fix.py
+
+      - name: Apply reviewed corrections
+        run: python build/apply_review_fix.py
 
       - name: Static and source QA
         shell: pwsh
@@ -60,17 +76,17 @@ jobs:
         shell: pwsh
         run: |
           Set-Location buildsrc
-          python -m PyInstaller --noconfirm --clean --onefile --windowed --name 'Sokhna Port 2026 v4.8.17.0' --add-data 'app;app' launcher.py
-          if(-not(Test-Path 'dist/Sokhna Port 2026 v4.8.17.0.exe')){throw 'EXE was not created'}
-          Get-FileHash 'dist/Sokhna Port 2026 v4.8.17.0.exe' -Algorithm SHA256
-          Get-Item 'dist/Sokhna Port 2026 v4.8.17.0.exe' | Format-List Name,Length,LastWriteTime
+          python -m PyInstaller --noconfirm --clean --onefile --windowed --name 'Sokhna Port 2026 v4.8.17.1' --add-data 'app;app' launcher.py
+          if(-not(Test-Path 'dist/Sokhna Port 2026 v4.8.17.1.exe')){throw 'EXE was not created'}
+          Get-FileHash 'dist/Sokhna Port 2026 v4.8.17.1.exe' -Algorithm SHA256
+          Get-Item 'dist/Sokhna Port 2026 v4.8.17.1.exe' | Format-List Name,Length,LastWriteTime
 
       - name: Smoke-test final EXE
         shell: pwsh
         run: |
           $qa=Join-Path $env:RUNNER_TEMP 'Sokhna2026Smoke'
           New-Item -ItemType Directory -Force $qa | Out-Null
-          $exe=Resolve-Path 'buildsrc/dist/Sokhna Port 2026 v4.8.17.0.exe'
+          $exe=Resolve-Path 'buildsrc/dist/Sokhna Port 2026 v4.8.17.1.exe'
           $p=Start-Process -FilePath $exe -ArgumentList @('--data-root',$qa,'--port','18766') -PassThru
           $ok=$false
           try {
@@ -78,7 +94,7 @@ jobs:
               Start-Sleep -Milliseconds 700
               try {
                 $h=Invoke-RestMethod -Uri 'http://127.0.0.1:18766/api/health' -TimeoutSec 2
-                if($h.ok -and $h.appVersion -eq '4.8.17.0-DESKTOP' -and $h.quickCheck -eq 'ok'){ $ok=$true; break }
+                if($h.ok -and $h.appVersion -eq '4.8.17.1-DESKTOP' -and $h.quickCheck -eq 'ok'){ $ok=$true; break }
               } catch {}
             }
             if(-not $ok){throw 'Final EXE health smoke test failed'}
@@ -91,7 +107,7 @@ jobs:
       - name: Upload final EXE
         uses: actions/upload-artifact@v4
         with:
-          name: Sokhna-Port-2026-Final-v4.8.17.0
-          path: buildsrc/dist/Sokhna Port 2026 v4.8.17.0.exe
+          name: Sokhna-Port-2026-Final-v4.8.17.1
+          path: buildsrc/dist/Sokhna Port 2026 v4.8.17.1.exe
           if-no-files-found: error
           retention-days: 30
