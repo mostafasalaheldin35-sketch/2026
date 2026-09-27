@@ -1,4 +1,4 @@
-name: Diagnose v4.8.17.5 specification
+name: Export v4.8.17.4 clean backend
 
 on:
   workflow_dispatch:
@@ -10,41 +10,47 @@ permissions:
   contents: read
 
 jobs:
-  diagnose:
+  export:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Extract reviewed bundle and print specification
+      - name: Prepare v4.8.17.4 source
         shell: pwsh
         run: |
+          $ErrorActionPreference='Stop'
+          tar -xzf 'Sokhna-Port-2026-Changes-Bundle.tgz' -C build
+          tar -xzf 'Sokhna-Port-2026-Review-Fix.tgz' -C build
+          python build/prepare_source.py
+          python build/apply_v2026.py
+          python build/apply_review_fix.py
           @'
-          import base64, tarfile, re
+          import base64
           from pathlib import Path
-          parts=sorted(Path('build').glob('v4175r_*.b64'))
+          parts=sorted(Path('build').glob('v4172_*.b64'))
           raw=base64.b64decode(''.join(p.read_text().strip() for p in parts),validate=True)
-          Path('r.tgz').write_bytes(raw)
-          Path('r').mkdir(exist_ok=True)
-          with tarfile.open('r.tgz','r:gz') as t: t.extractall('r')
-          print('--- TEST START ---')
-          _test=Path('r/payload/test_v4175.py').read_text(encoding='utf-8')
-          print(_test.encode('unicode_escape').decode('ascii'))
-          print('--- TEST END ---')
-          js=Path('r/payload/app/v4175_patch.js').read_text(encoding='utf-8')
-          print('--- API STRINGS ---')
-          for x in sorted(set(re.findall(r'/api/[A-Za-z0-9_?=&./-]+',js))):
-              print(x)
-          print('--- BACKEND VALID PREFIX SYMBOLS ---')
-          b=Path('r/payload/backend.py').read_bytes()
-          try:
-              s=b.decode('utf-8')
-          except UnicodeDecodeError as e:
-              s=b[:e.start].decode('utf-8')
-              print('VALID_PREFIX_BYTES',e.start)
-          for line in s.splitlines():
-              if line.startswith('def ') or line.startswith('    def ') or '/api/' in line or 'backup' in line.lower() or 'restore' in line.lower():
-                  print(line.encode('unicode_escape').decode('ascii'))
-          '@ | Set-Content -Encoding UTF8 diag_spec.py
-          python diag_spec.py
+          Path('v4172.tgz').write_bytes(raw)
+          '@ | Set-Content -Encoding UTF8 d1.py
+          python d1.py
+          tar -xzf v4172.tgz -C build
+          python build/apply_v4172.py
+          @'
+          import base64
+          from pathlib import Path
+          parts=sorted(Path('build').glob('v4174_*.b64'))
+          raw=base64.b64decode(''.join(p.read_text().strip() for p in parts),validate=True)
+          Path('v4174.tgz').write_bytes(raw)
+          '@ | Set-Content -Encoding UTF8 d2.py
+          python d2.py
+          tar -xzf v4174.tgz -C build
+          python build/apply_v4174.py
+          python build/apply_v4174_cli_root_fix.py
+          python -m py_compile buildsrc/backend.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: clean-v4174-backend
+          path: buildsrc/backend.py
+          if-no-files-found: error
+          retention-days: 7
