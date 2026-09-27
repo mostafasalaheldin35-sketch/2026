@@ -13,6 +13,8 @@ on:
       - 'build/v4174_*.b64'
       - 'build/v4175_*.b64'
       - 'build/v4175r_*.b64'
+      - 'build/v4175_backend_ext.b64'
+      - 'build/apply_v4175_backend_fix.py'
       - 'build/apply_v4174_cli_root_fix.py'
       - '.github/workflows/build-final.yml'
 
@@ -151,6 +153,12 @@ jobs:
           node --check buildsrc/app_check_final.js
           python build/test_v4174.py
 
+      - name: Preserve clean v4.8.17.4 backend
+        shell: pwsh
+        run: |
+          Copy-Item 'buildsrc/backend.py' 'build/v4174_backend_clean.py' -Force
+          python -m py_compile build/v4174_backend_clean.py
+
       - name: Reconstruct final reviewed v4.8.17.5 changes
         shell: pwsh
         run: |
@@ -181,33 +189,13 @@ jobs:
           python build/v4175r/apply_v4175.py
           if($LASTEXITCODE -ne 0){throw 'apply_v4175.py failed'}
 
-      - name: Normalize patched source text
+      - name: Install verified v4.8.17.5 backend repair
         shell: pwsh
         run: |
-          @'
-          from pathlib import Path
-
-          def normalize(path):
-              p=Path(path)
-              b=p.read_bytes()
-              if b'\x00' not in b:
-                  b.decode('utf-8')
-                  print(path, 'UTF-8/no-NUL OK')
-                  return
-              clean=b.replace(b'\x00',b'')
-              try:
-                  s=clean.decode('utf-8')
-              except UnicodeDecodeError as e:
-                  raise SystemExit(f'{path}: removing NUL bytes did not yield valid UTF-8: {e}')
-              if path.endswith('.py') and not any(t in s for t in ('import ','def ','class ')):
-                  raise SystemExit(f'{path}: normalized text does not look like Python source')
-              p.write_text(s.lstrip('\ufeff'),encoding='utf-8',newline='\n')
-              print(path, 'removed', b.count(b'\x00'), 'NUL byte(s) and rewrote UTF-8')
-
-          for p in ['buildsrc/backend.py','buildsrc/launcher.py','buildsrc/test_v4175.py']:
-              normalize(p)
-          '@ | Set-Content -Encoding UTF8 build/normalize_v4175_text.py
-          python build/normalize_v4175_text.py
+          $ErrorActionPreference='Stop'
+          python build/apply_v4175_backend_fix.py
+          if($LASTEXITCODE -ne 0){throw 'apply_v4175_backend_fix.py failed'}
+          python -m py_compile buildsrc/backend.py buildsrc/v4175_backend_ext.py
 
       - name: Final v4.8.17.5 QA
         shell: pwsh
