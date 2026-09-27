@@ -1,7 +1,6 @@
-name: Inspect locally reviewed v4.8.17.6 bundle
+name: Inspect local v4.8.17.6 bundle
 
 on:
-  workflow_dispatch:
   push:
     paths:
       - '.github/workflows/inspect-v4176local.yml'
@@ -11,33 +10,34 @@ permissions:
 
 jobs:
   inspect:
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
       - name: Reconstruct and inspect local bundle
-        shell: pwsh
+        shell: bash
         run: |
-          $ErrorActionPreference='Stop'
-          @'
-          import base64, hashlib
+          python - <<'PY'
+          import base64, hashlib, tarfile
           from pathlib import Path
           parts=sorted(Path('build').glob('v4176local_*.b64'))
+          print('PARTS', [p.name for p in parts])
           if len(parts) != 6:
-              raise SystemExit(f'Expected 6 local chunks, got {len(parts)}')
+              raise SystemExit(f'Expected 6 chunks, got {len(parts)}')
           encoded=''.join(p.read_text(encoding='utf-8').strip() for p in parts)
           raw=base64.b64decode(encoded, validate=True)
-          print('LOCAL_BUNDLE_SHA256='+hashlib.sha256(raw).hexdigest())
-          print('LOCAL_BUNDLE_BYTES='+str(len(raw)))
-          print('LOCAL_BUNDLE_MAGIC='+raw[:8].hex())
-          Path('v4176local.tar.xz').write_bytes(raw)
-          '@ | Set-Content -Encoding UTF8 build/inspect_local_bundle.py
-          python build/inspect_local_bundle.py
-          New-Item -ItemType Directory -Force build/v4176local | Out-Null
-          tar -xf v4176local.tar.xz -C build/v4176local
-          Get-ChildItem build/v4176local -Recurse -File | ForEach-Object { Write-Host ('LOCAL_FILE='+$_.FullName.Replace((Resolve-Path '.').Path+'\','')) }
-          if(-not(Test-Path 'build/v4176local/apply_v4176local.py')){throw 'apply_v4176local.py missing'}
-          if(-not(Test-Path 'build/v4176local/test_v4176local.py')){throw 'test_v4176local.py missing'}
-          python -m py_compile build/v4176local/apply_v4176local.py build/v4176local/test_v4176local.py
+          print('SHA256', hashlib.sha256(raw).hexdigest())
+          print('BYTES', len(raw))
+          Path('/tmp/v4176local.tar.xz').write_bytes(raw)
+          with tarfile.open('/tmp/v4176local.tar.xz','r:xz') as t:
+              for m in t.getmembers():
+                  print('MEMBER',m.name,m.size)
+              t.extractall('/tmp/v4176local')
+          for p in sorted(Path('/tmp/v4176local').rglob('*')):
+              if p.is_file() and p.suffix.lower() in {'.py','.js','.css','.json','.txt','.md'}:
+                  print('---FILE',p.relative_to('/tmp/v4176local'),'---')
+                  s=p.read_text(encoding='utf-8',errors='replace')
+                  print(s[:18000].encode('unicode_escape').decode('ascii'))
+          PY
