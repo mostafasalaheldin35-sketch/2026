@@ -17,25 +17,84 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Reconstruct and inspect
+
+      - name: Prepare v4.8.17.4 source
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          if(-not(Test-Path 'Sokhna-Port-2026-Changes-Bundle.tgz')){throw 'Missing changes bundle'}
+          tar -xzf 'Sokhna-Port-2026-Changes-Bundle.tgz' -C build
+          tar -xzf 'Sokhna-Port-2026-Review-Fix.tgz' -C build
+          python build/prepare_source.py
+          python build/apply_v2026.py
+          python build/apply_review_fix.py
+          @'
+          import base64
+          from pathlib import Path
+          parts=sorted(Path('build').glob('v4172_*.b64'))
+          raw=base64.b64decode(''.join(p.read_text().strip() for p in parts),validate=True)
+          Path('v4172.tgz').write_bytes(raw)
+          '@ | Set-Content -Encoding UTF8 d1.py
+          python d1.py
+          tar -xzf v4172.tgz -C build
+          python build/apply_v4172.py
+          @'
+          import base64
+          from pathlib import Path
+          parts=sorted(Path('build').glob('v4174_*.b64'))
+          raw=base64.b64decode(''.join(p.read_text().strip() for p in parts),validate=True)
+          Path('v4174.tgz').write_bytes(raw)
+          '@ | Set-Content -Encoding UTF8 d2.py
+          python d2.py
+          tar -xzf v4174.tgz -C build
+          python build/apply_v4174.py
+          python build/apply_v4174_cli_root_fix.py
+
+      - name: Reconstruct and compare v4.8.17.5 payload
         shell: pwsh
         run: |
           @'
           import base64, hashlib, tarfile
           from pathlib import Path
+
           parts=sorted(Path('build').glob('v4175r_*.b64'))
           encoded=''.join(p.read_text(encoding='utf-8').strip() for p in parts)
           raw=base64.b64decode(encoded,validate=True)
-          print('bundle sha256',hashlib.sha256(raw).hexdigest(),'bytes',len(raw))
+          print('BUNDLE',hashlib.sha256(raw).hexdigest(),len(raw))
           Path('diag-v4175.tgz').write_bytes(raw)
           Path('diag-v4175').mkdir(exist_ok=True)
           with tarfile.open('diag-v4175.tgz','r:gz') as t:
-              for m in t.getmembers():
-                  print('MEMBER',m.name,m.size)
               t.extractall('diag-v4175')
-          p=Path('diag-v4175/apply_v4175.py')
-          print('--- APPLY START ---')
-          print(p.read_text(encoding='utf-8',errors='replace'))
-          print('--- APPLY END ---')
-          '@ | Set-Content -Encoding UTF8 diag_v4175.py
-          python diag_v4175.py
+
+          old=Path('buildsrc/backend.py').read_bytes()
+          new=Path('diag-v4175/payload/backend.py').read_bytes()
+          print('OLD',len(old),hashlib.sha256(old).hexdigest(),'NUL',old.count(b'\0'))
+          print('NEW',len(new),hashlib.sha256(new).hexdigest(),'NUL',new.count(b'\0'))
+
+          p=0
+          lim=min(len(old),len(new))
+          while p<lim and old[p]==new[p]:
+              p+=1
+          s=0
+          while s<(lim-p) and old[-1-s]==new[-1-s]:
+              s+=1
+          print('COMMON_PREFIX',p,'COMMON_SUFFIX',s)
+          print('OLD_DIFF_LEN',len(old)-p-s,'NEW_DIFF_LEN',len(new)-p-s)
+          for label,b,pos in [('OLD',old,p),('NEW',new,p)]:
+              a=max(0,pos-120); z=min(len(b),pos+360)
+              print(label+'_HEX',b[a:z].hex())
+              print(label+'_LATIN1',repr(b[a:z].decode('latin-1')))
+
+          try:
+              new.decode('utf-8')
+              print('NEW_UTF8_OK')
+          except UnicodeDecodeError as e:
+              print('NEW_UTF8_ERROR',e.start,e.end,hex(new[e.start]))
+              a=max(0,e.start-160); z=min(len(new),e.start+320)
+              print('ERR_HEX',new[a:z].hex())
+              print('ERR_LATIN1',repr(new[a:z].decode('latin-1')))
+
+          nz=[i for i,x in enumerate(new) if x==0]
+          print('NUL_FIRST',nz[:40])
+          '@ | Set-Content -Encoding UTF8 diag_compare.py
+          python diag_compare.py
