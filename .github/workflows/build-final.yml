@@ -343,10 +343,14 @@ jobs:
             $top=@(Get-ChildItem -LiteralPath $backupRoot -Directory | Select-Object -ExpandProperty Name | Sort-Object)
             if(($top -join '|') -ne 'Excel Reports|Recovery'){throw "Backup root clutter remains: $($top -join ', ')"}
 
-            if(-not $h.desktopShortcut -or -not(Test-Path -LiteralPath $h.desktopShortcut)){throw 'Desktop shortcut missing'}
+            $desktop=[Environment]::GetFolderPath('Desktop')
+            if(-not $desktop){throw 'Windows Desktop path unavailable'}
+            $shortcut=Join-Path $desktop 'Sokhna Port.lnk'
+            if(-not(Test-Path -LiteralPath $shortcut)){throw "Desktop shortcut missing: $shortcut"}
             $wsh=New-Object -ComObject WScript.Shell
-            $lnk=$wsh.CreateShortcut($h.desktopShortcut)
+            $lnk=$wsh.CreateShortcut($shortcut)
             if(-not $lnk.TargetPath -or -not(Test-Path -LiteralPath $lnk.TargetPath)){throw 'Desktop shortcut target invalid'}
+            if([IO.Path]::GetFileName($lnk.TargetPath) -ne 'Sokhna Port.exe'){throw "Desktop shortcut points to wrong target: $($lnk.TargetPath)"}
 
             # Seed real data so Excel validation checks content, not merely file creation.
             $now='2026-09-27T12:00:00Z'
