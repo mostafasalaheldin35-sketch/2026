@@ -246,8 +246,9 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
-          Set-Location buildsrc
-          python ../build/v48176/apply_v48176.py
+          New-Item -ItemType Directory -Force buildsrc/_v48176 | Out-Null
+          Copy-Item 'build/v48176/*' 'buildsrc/_v48176/' -Recurse -Force
+          python buildsrc/_v48176/apply_v48176.py
           if($LASTEXITCODE -ne 0){throw 'apply_v48176.py failed'}
 
       - name: Final v4.8.17.6 QA
