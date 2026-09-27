@@ -11,6 +11,7 @@ on:
       - 'build/v4172_*.b64'
       - 'build/v4173-final-scripts.b64'
       - 'build/v4174_*.b64'
+      - 'build/v4175_*.b64'
       - 'build/apply_v4174_cli_root_fix.py'
       - '.github/workflows/build-final.yml'
 
@@ -149,10 +150,61 @@ jobs:
           node --check buildsrc/app_check_final.js
           python build/test_v4174.py
 
+      - name: Reconstruct reviewed v4.8.17.5 changes
+        shell: pwsh
+        run: |
+          @'
+          import base64, hashlib
+          from pathlib import Path
+          parts=sorted(Path('build').glob('v4175_*.b64'))
+          if len(parts) != 6:
+              raise SystemExit(f'Expected 6 v4175 chunks, got {len(parts)}')
+          encoded=''.join(p.read_text(encoding='utf-8').strip() for p in parts)
+          raw=base64.b64decode(encoded, validate=True)
+          digest=hashlib.sha256(raw).hexdigest()
+          expected='bbeabb8bc2b59eb3d61be682f088fabe2bb226da9230d0b8990d841e65e2533d'
+          if digest != expected:
+              raise SystemExit(f'v4.8.17.5 bundle SHA mismatch: {digest}')
+          Path('Sokhna-Port-v4.8.17.5-Reviewed-Changes.tgz').write_bytes(raw)
+          print('v4.8.17.5 reviewed bundle verified:', digest)
+          '@ | Set-Content -Encoding UTF8 build/reconstruct_v4175.py
+          python build/reconstruct_v4175.py
+          New-Item -ItemType Directory -Force build/v4175 | Out-Null
+          tar -xzf 'Sokhna-Port-v4.8.17.5-Reviewed-Changes.tgz' -C build/v4175
+          if(-not(Test-Path 'build/v4175/apply_v4175.py')){throw 'apply_v4175.py missing'}
+          if(-not(Test-Path 'build/v4175/test_v4175.py')){throw 'test_v4175.py missing'}
+
+      - name: Apply reviewed v4.8.17.5 changes
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          python build/v4175/apply_v4175.py
+          if($LASTEXITCODE -ne 0){throw 'apply_v4175.py failed'}
+
+      - name: Final v4.8.17.5 QA
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          python -m py_compile buildsrc/backend.py buildsrc/launcher.py
+          node --check buildsrc/app/v2026_patch.js
+          node --check buildsrc/app/v4172_patch.js
+          node --check buildsrc/app/v4175_patch.js
+          @'
+          from pathlib import Path
+          import re
+          s=Path('buildsrc/app/index.html').read_text(encoding='utf-8')
+          scripts=re.findall(r'<script>(.*?)</script>',s,flags=re.I|re.S)
+          Path('buildsrc/app_check_v4175.js').write_text('\n'.join(x for x in scripts if x.strip()),encoding='utf-8')
+          '@ | Set-Content -Encoding UTF8 build/extract_inline_v4175.py
+          python build/extract_inline_v4175.py
+          node --check buildsrc/app_check_v4175.js
+          $env:SOKHNA_SRC='buildsrc'
+          python build/v4175/test_v4175.py
+
       - name: Upload reviewed source snapshot
         uses: actions/upload-artifact@v4
         with:
-          name: reviewed-source-v4.8.17.4
+          name: reviewed-source-v4.8.17.5
           path: buildsrc
           if-no-files-found: error
           retention-days: 7
@@ -164,10 +216,10 @@ jobs:
         shell: pwsh
         run: |
           Set-Location buildsrc
-          python -m PyInstaller --noconfirm --clean --onefile --windowed --name 'Sokhna Port 2026 v4.8.17.4' --add-data 'app;app' launcher.py
-          if(-not(Test-Path 'dist/Sokhna Port 2026 v4.8.17.4.exe')){throw 'EXE was not created'}
-          Get-FileHash 'dist/Sokhna Port 2026 v4.8.17.4.exe' -Algorithm SHA256
-          Get-Item 'dist/Sokhna Port 2026 v4.8.17.4.exe' | Format-List Name,Length,LastWriteTime
+          python -m PyInstaller --noconfirm --clean --onefile --windowed --name 'Sokhna Port 2026 v4.8.17.5' --add-data 'app;app' launcher.py
+          if(-not(Test-Path 'dist/Sokhna Port 2026 v4.8.17.5.exe')){throw 'EXE was not created'}
+          Get-FileHash 'dist/Sokhna Port 2026 v4.8.17.5.exe' -Algorithm SHA256
+          Get-Item 'dist/Sokhna Port 2026 v4.8.17.5.exe' | Format-List Name,Length,LastWriteTime
 
       - name: Smoke-test final EXE
         shell: pwsh
@@ -175,7 +227,7 @@ jobs:
           $ErrorActionPreference='Stop'
           $qaParent=Join-Path $env:RUNNER_TEMP 'Sokhna2026SmokeParent'
           New-Item -ItemType Directory -Force $qaParent | Out-Null
-          $exe=Resolve-Path 'buildsrc/dist/Sokhna Port 2026 v4.8.17.4.exe'
+          $exe=Resolve-Path 'buildsrc/dist/Sokhna Port 2026 v4.8.17.5.exe'
           $p=Start-Process -FilePath $exe -ArgumentList @('--data-root',$qaParent,'--port','18766') -PassThru
           $ok=$false
           try {
@@ -183,7 +235,7 @@ jobs:
               Start-Sleep -Milliseconds 700
               try {
                 $h=Invoke-RestMethod -Uri 'http://127.0.0.1:18766/api/health' -TimeoutSec 2
-                if($h.ok -and $h.appVersion -eq '4.8.17.4-DESKTOP' -and $h.quickCheck -eq 'ok'){ $ok=$true; break }
+                if($h.ok -and $h.appVersion -eq '4.8.17.5-DESKTOP' -and $h.quickCheck -eq 'ok'){ $ok=$true; break }
               } catch {}
             }
             if(-not $ok){throw 'Final EXE health smoke test failed'}
@@ -203,7 +255,7 @@ jobs:
       - name: Upload final EXE
         uses: actions/upload-artifact@v4
         with:
-          name: Sokhna-Port-2026-Final-v4.8.17.4
-          path: buildsrc/dist/Sokhna Port 2026 v4.8.17.4.exe
+          name: Sokhna-Port-2026-Final-v4.8.17.5
+          path: buildsrc/dist/Sokhna Port 2026 v4.8.17.5.exe
           if-no-files-found: error
           retention-days: 30
