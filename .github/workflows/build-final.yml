@@ -12,6 +12,7 @@ on:
       - 'build/v4173-final-scripts.b64'
       - 'build/v4174_*.b64'
       - 'build/v4175_*.b64'
+      - 'build/v4175r_*.b64'
       - 'build/apply_v4174_cli_root_fix.py'
       - '.github/workflows/build-final.yml'
 
@@ -150,35 +151,34 @@ jobs:
           node --check buildsrc/app_check_final.js
           python build/test_v4174.py
 
-      - name: Reconstruct reviewed v4.8.17.5 changes
+      - name: Reconstruct final reviewed v4.8.17.5 changes
         shell: pwsh
         run: |
           @'
           import base64, hashlib
           from pathlib import Path
-          parts=sorted(Path('build').glob('v4175_*.b64'))
-          if len(parts) != 6:
-              raise SystemExit(f'Expected 6 v4175 chunks, got {len(parts)}')
+          parts=sorted(Path('build').glob('v4175r_*.b64'))
+          if len(parts) != 5:
+              raise SystemExit(f'Expected 5 v4175r chunks, got {len(parts)}')
           encoded=''.join(p.read_text(encoding='utf-8').strip() for p in parts)
           raw=base64.b64decode(encoded, validate=True)
           digest=hashlib.sha256(raw).hexdigest()
-          expected='bbeabb8bc2b59eb3d61be682f088fabe2bb226da9230d0b8990d841e65e2533d'
+          expected='d7d3c0a7a42425d604fd318770491e1aff1ed40c699badee5274aa709f68684b'
           if digest != expected:
-              raise SystemExit(f'v4.8.17.5 bundle SHA mismatch: {digest}')
+              raise SystemExit(f'v4.8.17.5 reviewed bundle SHA mismatch: {digest}')
           Path('Sokhna-Port-v4.8.17.5-Reviewed-Changes.tgz').write_bytes(raw)
           print('v4.8.17.5 reviewed bundle verified:', digest)
-          '@ | Set-Content -Encoding UTF8 build/reconstruct_v4175.py
-          python build/reconstruct_v4175.py
-          New-Item -ItemType Directory -Force build/v4175 | Out-Null
-          tar -xzf 'Sokhna-Port-v4.8.17.5-Reviewed-Changes.tgz' -C build/v4175
-          if(-not(Test-Path 'build/v4175/apply_v4175.py')){throw 'apply_v4175.py missing'}
-          if(-not(Test-Path 'build/v4175/test_v4175.py')){throw 'test_v4175.py missing'}
+          '@ | Set-Content -Encoding UTF8 build/reconstruct_v4175r.py
+          python build/reconstruct_v4175r.py
+          New-Item -ItemType Directory -Force build/v4175r | Out-Null
+          tar -xzf 'Sokhna-Port-v4.8.17.5-Reviewed-Changes.tgz' -C build/v4175r
+          if(-not(Test-Path 'build/v4175r/apply_v4175.py')){throw 'apply_v4175.py missing'}
 
-      - name: Apply reviewed v4.8.17.5 changes
+      - name: Apply final reviewed v4.8.17.5 changes
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
-          python build/v4175/apply_v4175.py
+          python build/v4175r/apply_v4175.py
           if($LASTEXITCODE -ne 0){throw 'apply_v4175.py failed'}
 
       - name: Final v4.8.17.5 QA
@@ -198,8 +198,7 @@ jobs:
           '@ | Set-Content -Encoding UTF8 build/extract_inline_v4175.py
           python build/extract_inline_v4175.py
           node --check buildsrc/app_check_v4175.js
-          $env:SOKHNA_SRC='buildsrc'
-          python build/v4175/test_v4175.py
+          python buildsrc/test_v4175.py
 
       - name: Upload reviewed source snapshot
         uses: actions/upload-artifact@v4
@@ -240,14 +239,30 @@ jobs:
             }
             if(-not $ok){throw 'Final EXE health smoke test failed'}
             if($h.dataRoot -notmatch 'Sokhna Port Data'){throw "Data root is not canonical: $($h.dataRoot)"}
+
             $index=Invoke-WebRequest -Uri 'http://127.0.0.1:18766/app/index.html' -UseBasicParsing -TimeoutSec 3
-            if($index.StatusCode -ne 200 -or $index.Content -notmatch '4\.8\.17\.4-DESKTOP'){throw 'v4.8.17.4 index/version smoke failed'}
-            if($index.Content -match 'id="dashboardItemFilter"' -or $index.Content -match 'id="dashboardInspectionFilter"'){throw 'Legacy dashboard filter still present'}
-            if($index.Content -notmatch 'dashboardItemFilterMount' -or $index.Content -notmatch 'dashboardInspectionFilterMount'){throw 'New dashboard filter mounts missing'}
-            $patch=Invoke-WebRequest -Uri 'http://127.0.0.1:18766/app/v4172_patch.js' -UseBasicParsing -TimeoutSec 3
-            if($patch.StatusCode -ne 200 -or $patch.Content -notmatch 'قريب من الانتهاء -'){throw 'Corrected status renderer missing'}
-            $css=Invoke-WebRequest -Uri 'http://127.0.0.1:18766/app/v4172_patch.css' -UseBasicParsing -TimeoutSec 3
-            if($css.StatusCode -ne 200 -or $css.Content -notmatch 'v4\.8\.17\.4 corrections'){throw 'v4.8.17.4 table-boundary CSS missing'}
+            if($index.StatusCode -ne 200 -or $index.Content -notmatch '4\.8\.17\.5-DESKTOP'){throw 'v4.8.17.5 index/version smoke failed'}
+            if($index.Content -notmatch 'v4175_patch\.js' -or $index.Content -notmatch 'v4175_patch\.css'){throw 'v4.8.17.5 assets missing'}
+
+            $patch=Invoke-WebRequest -Uri 'http://127.0.0.1:18766/app/v4175_patch.js' -UseBasicParsing -TimeoutSec 3
+            if($patch.StatusCode -ne 200){throw 'v4.8.17.5 patch missing'}
+            foreach($token in @('v4175BackupNow','v4175GeneralRestore','/api/restore-backup','Manual Excel + Reports','v4175MobileFiles')){
+              if($patch.Content -notmatch [regex]::Escape($token)){throw "Sync/backup UI token missing: $token"}
+            }
+
+            $manual=Invoke-RestMethod -Uri 'http://127.0.0.1:18766/api/manual-backup' -Method Post -ContentType 'application/json' -Body '{}' -TimeoutSec 10
+            if(-not $manual.ok -or -not ($manual.path -match '\.sqlite$')){throw 'Manual SQLite backup failed'}
+            $list=Invoke-RestMethod -Uri 'http://127.0.0.1:18766/api/backups' -TimeoutSec 5
+            if(-not $list.ok -or $list.backups.Count -lt 1){throw 'Backup listing failed'}
+            $body=@{path=$manual.path}|ConvertTo-Json -Compress
+            $verify=Invoke-RestMethod -Uri 'http://127.0.0.1:18766/api/verify-backup' -Method Post -ContentType 'application/json' -Body $body -TimeoutSec 10
+            if(-not $verify.ok -or -not $verify.valid){throw 'Backup verification failed'}
+            $preview=Invoke-RestMethod -Uri 'http://127.0.0.1:18766/api/backup-preview' -Method Post -ContentType 'application/json' -Body $body -TimeoutSec 10
+            if(-not $preview.ok){throw 'Restore preview failed'}
+            $restore=Invoke-RestMethod -Uri 'http://127.0.0.1:18766/api/restore-backup' -Method Post -ContentType 'application/json' -Body $body -TimeoutSec 15
+            if(-not $restore.ok -or -not (Test-Path $restore.beforeRestore)){throw 'Restore / Before-Restore safety backup failed'}
+            $post=Invoke-RestMethod -Uri 'http://127.0.0.1:18766/api/health' -TimeoutSec 5
+            if(-not $post.ok -or $post.quickCheck -ne 'ok'){throw 'Post-restore health failed'}
           } finally {
             if($p -and -not $p.HasExited){Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue}
           }
