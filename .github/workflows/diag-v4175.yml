@@ -29,7 +29,8 @@ jobs:
           Path('r').mkdir(exist_ok=True)
           with tarfile.open('r.tgz','r:gz') as t: t.extractall('r')
           print('--- TEST START ---')
-          print(Path('r/payload/test_v4175.py').read_text(encoding='utf-8'))
+          _test=Path('r/payload/test_v4175.py').read_text(encoding='utf-8')
+          print(_test.encode('unicode_escape').decode('ascii'))
           print('--- TEST END ---')
           js=Path('r/payload/app/v4175_patch.js').read_text(encoding='utf-8')
           print('--- API STRINGS ---')
@@ -44,6 +45,6 @@ jobs:
               print('VALID_PREFIX_BYTES',e.start)
           for line in s.splitlines():
               if line.startswith('def ') or line.startswith('    def ') or '/api/' in line or 'backup' in line.lower() or 'restore' in line.lower():
-                  print(line)
+                  print(line.encode('unicode_escape').decode('ascii'))
           '@ | Set-Content -Encoding UTF8 diag_spec.py
           python diag_spec.py
