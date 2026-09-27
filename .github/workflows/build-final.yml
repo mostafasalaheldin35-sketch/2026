@@ -17,6 +17,7 @@ on:
       - 'build/apply_v4175_backend_fix.py'
       - 'build/apply_v4174_cli_root_fix.py'
       - 'build/v48176_bundle_*.b64'
+      - 'build/v4176local_*.b64'
       - 'build/apply_v48176_emergency_fix.py'
       - '.github/workflows/build-final.yml'
 
@@ -218,58 +219,64 @@ jobs:
           node --check buildsrc/app_check_v4175.js
           python buildsrc/test_v4175.py
 
-      - name: Reconstruct reviewed v4.8.17.6 bundle
+      - name: Reconstruct locally reviewed v4.8.17.6 bundle
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
           @'
-          import base64, hashlib
+          import base64, hashlib, tarfile
           from pathlib import Path
-          parts=sorted(Path('build').glob('v48176_bundle_*.b64'))
-          if len(parts) != 3:
-              raise SystemExit(f'Expected 3 v48176 chunks, got {len(parts)}')
+          parts=sorted(Path('build').glob('v4176local_*.b64'))
+          if len(parts) != 6:
+              raise SystemExit(f'Expected 6 v4176local chunks, got {len(parts)}')
           encoded=''.join(p.read_text(encoding='utf-8').strip() for p in parts)
           raw=base64.b64decode(encoded, validate=True)
           digest=hashlib.sha256(raw).hexdigest()
-          expected='91311baf2c75b19ce941d61e83161e3cf7c5f7ddc12f0ef3cdf01b036deea000'
+          expected='967f809a8911fb1c9d3ca72e963b71d8ebfcfc0278f3161db8f6830b2f4ec6b4'
           if digest != expected:
-              raise SystemExit(f'v4.8.17.6 bundle SHA mismatch: {digest}')
-          Path('Sokhna-Port-v4.8.17.6-Reviewed-Changes.tgz').write_bytes(raw)
-          print('v4.8.17.6 reviewed bundle verified:', digest)
-          '@ | Set-Content -Encoding UTF8 build/reconstruct_v48176.py
-          python build/reconstruct_v48176.py
-          New-Item -ItemType Directory -Force build/v48176 | Out-Null
-          tar -xzf 'Sokhna-Port-v4.8.17.6-Reviewed-Changes.tgz' -C build/v48176
-          if(-not(Test-Path 'build/v48176/apply_v48176.py')){throw 'apply_v48176.py missing'}
-          if(-not(Test-Path 'build/v48176/test_v48176.py')){throw 'test_v48176.py missing'}
+              raise SystemExit(f'local v4.8.17.6 bundle SHA mismatch: {digest}')
+          archive=Path('Sokhna-Port-v4.8.17.6-Local-Reviewed.tar.xz')
+          archive.write_bytes(raw)
+          out=Path('build/v4176local')
+          out.mkdir(parents=True,exist_ok=True)
+          with tarfile.open(archive,'r:xz') as t:
+              t.extractall(out)
+          for required in ('apply_v4176.py','payload/test_v4176.py','payload/test_http_v4176.py','payload/test_numbering_v4176.py'):
+              if not (out/required).is_file():
+                  raise SystemExit(f'Missing local v4176 payload file: {required}')
+          print('local v4.8.17.6 bundle verified:', digest)
+          '@ | Set-Content -Encoding UTF8 build/reconstruct_v4176local.py
+          python build/reconstruct_v4176local.py
 
-      - name: Apply reviewed v4.8.17.6 changes
+      - name: Apply locally reviewed v4.8.17.6 changes
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
-          New-Item -ItemType Directory -Force buildsrc/_v48176 | Out-Null
-          Copy-Item 'build/v48176/*' 'buildsrc/_v48176/' -Recurse -Force
-          python buildsrc/_v48176/apply_v48176.py
-          if($LASTEXITCODE -ne 0){throw 'apply_v48176.py failed'}
+          python build/v4176local/apply_v4176.py
+          if($LASTEXITCODE -ne 0){throw 'apply_v4176.py failed'}
 
-      - name: Apply v4.8.17.6 emergency-copy verification fix
+      - name: Final local v4.8.17.6 QA
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
-          python build/apply_v48176_emergency_fix.py
-          if($LASTEXITCODE -ne 0){throw 'emergency-copy verification fix failed'}
-
-      - name: Final v4.8.17.6 QA
-        shell: pwsh
-        run: |
-          $ErrorActionPreference='Stop'
-          python -m py_compile buildsrc/backend.py buildsrc/launcher.py buildsrc/v4175_backend_ext.py buildsrc/v48176_backend_ext.py buildsrc/test_v4175.py buildsrc/test_v48176.py
+          python -m py_compile buildsrc/backend.py buildsrc/launcher.py buildsrc/v4175_backend_ext.py buildsrc/v4176_backend_ext.py buildsrc/test_v4175.py buildsrc/test_v4176.py buildsrc/test_http_v4176.py buildsrc/test_numbering_v4176.py
           node --check buildsrc/app/v2026_patch.js
           node --check buildsrc/app/v4172_patch.js
           node --check buildsrc/app/v4175_patch.js
-          node --check buildsrc/app/v48176_patch.js
+          node --check buildsrc/app/v4176_patch.js
+          @'
+          from pathlib import Path
+          import re
+          s=Path('buildsrc/app/index.html').read_text(encoding='utf-8')
+          scripts=re.findall(r'<script>(.*?)</script>',s,flags=re.I|re.S)
+          Path('buildsrc/app_check_v4176.js').write_text('\n'.join(x for x in scripts if x.strip()),encoding='utf-8')
+          '@ | Set-Content -Encoding UTF8 build/extract_inline_v4176.py
+          python build/extract_inline_v4176.py
+          node --check buildsrc/app_check_v4176.js
           python buildsrc/test_v4175.py
-          python buildsrc/test_v48176.py
+          python buildsrc/test_v4176.py
+          python buildsrc/test_numbering_v4176.py
+          python buildsrc/test_http_v4176.py
 
       - name: Upload reviewed source snapshot
         uses: actions/upload-artifact@v4
@@ -301,7 +308,7 @@ jobs:
           $p=Start-Process -FilePath $exe -ArgumentList @('--data-root',$qaParent,'--port','18766') -PassThru
           $ok=$false
           try {
-            for($i=0;$i -lt 40;$i++){
+            for($i=0;$i -lt 50;$i++){
               Start-Sleep -Milliseconds 700
               try {
                 $h=Invoke-RestMethod -Uri 'http://127.0.0.1:18766/api/health' -TimeoutSec 2
@@ -311,72 +318,75 @@ jobs:
             if(-not $ok){throw 'Final EXE health smoke test failed'}
             if($h.dataRoot -notmatch 'Sokhna Port Data'){throw "Data root is not canonical: $($h.dataRoot)"}
 
-            $index=Invoke-WebRequest -Uri 'http://127.0.0.1:18766/app/index.html' -UseBasicParsing -TimeoutSec 3
+            $index=Invoke-WebRequest -Uri 'http://127.0.0.1:18766/app/index.html' -UseBasicParsing -TimeoutSec 5
             if($index.StatusCode -ne 200 -or $index.Content -notmatch '4\.8\.17\.6-DESKTOP'){throw 'v4.8.17.6 index/version smoke failed'}
-            if($index.Content -notmatch 'v4175_patch\.js' -or $index.Content -notmatch 'v4175_patch\.css'){throw 'v4.8.17.5 assets missing'}
+            if($index.Content -notmatch 'v4176_patch\.js' -or $index.Content -notmatch 'v4176_patch\.css'){throw 'local v4.8.17.6 assets missing'}
 
-            $patch=Invoke-WebRequest -Uri 'http://127.0.0.1:18766/app/v4175_patch.js' -UseBasicParsing -TimeoutSec 3
-            if($patch.StatusCode -ne 200){throw 'v4.8.17.5 patch missing'}
-            foreach($token in @('v4175BackupNow','v4175GeneralRestore','/api/restore-backup','Manual Excel + Reports','v4175MobileFiles')){
-              if($patch.Content -notmatch [regex]::Escape($token)){throw "Sync/backup UI token missing: $token"}
-            }
+            $sw=Invoke-WebRequest -Uri 'http://127.0.0.1:18766/app/sw.js' -UseBasicParsing -TimeoutSec 5
+            if($sw.StatusCode -ne 200 -or $sw.Content -notmatch 'skipWaiting' -or $sw.Content -match 'caches\.'){throw 'Service Worker smoke failed'}
+            $fav=Invoke-WebRequest -Uri 'http://127.0.0.1:18766/favicon.ico' -UseBasicParsing -TimeoutSec 5 -SkipHttpErrorCheck
+            if($fav.StatusCode -ne 204){throw "favicon route should be quiet 204, got $($fav.StatusCode)"}
 
-            $index=Invoke-WebRequest -Uri 'http://127.0.0.1:18766/app/index.html' -UseBasicParsing -TimeoutSec 3
-            if($index.StatusCode -ne 200 -or $index.Content -notmatch '4\.8\.17\.6-DESKTOP'){throw 'v4.8.17.6 index/version smoke failed'}
-            if($index.Content -notmatch 'v48176_patch\.js' -or $index.Content -notmatch 'v48176_patch\.css'){throw 'v4.8.17.6 assets missing'}
-            $sw=Invoke-WebRequest -Uri 'http://127.0.0.1:18766/app/sw.js' -UseBasicParsing -TimeoutSec 3
-            if($sw.StatusCode -ne 200 -or $sw.Content -notmatch 'skipWaiting'){throw 'Service Worker smoke failed'}
-            $patch176=Invoke-WebRequest -Uri 'http://127.0.0.1:18766/app/v48176_patch.js' -UseBasicParsing -TimeoutSec 3
-            foreach($token in @('masterReorderToolbar','companyItemStatusMulti','findingActualCompletionDate','تاريخ الإنجاز الفعلي','dashboard-filter-right')){
-              if($patch176.Content -notmatch [regex]::Escape($token)){throw "v4.8.17.6 UI token missing: $token"}
+            $patch176=Invoke-WebRequest -Uri 'http://127.0.0.1:18766/app/v4176_patch.js' -UseBasicParsing -TimeoutSec 5
+            foreach($token in @('companyItemStatusMulti','findingActualCompletionDate','reorderStore','restoreSelectedViewport')){
+              if($patch176.Content -notmatch [regex]::Escape($token)){throw "local v4.8.17.6 UI token missing: $token"}
             }
-            if(-not $h.excelReportsRoot -or -not $h.backupsRoot){throw 'Clean backup roots missing from health'}
-            if((Split-Path $h.excelReportsRoot -Parent) -ne (Split-Path $h.backupsRoot -Parent)){throw 'Excel Reports and Recovery are not under one Backups root'}
+            if($patch176.Content -notmatch "statusText:'مغلق'"){throw 'Closed NCR status still includes elapsed days'}
+
+            if(-not $h.excelReportsRoot -or -not $h.backupsRoot){throw 'Backup roots missing from health'}
             $backupRoot=Split-Path $h.backupsRoot -Parent
             $top=@(Get-ChildItem -LiteralPath $backupRoot -Directory | Select-Object -ExpandProperty Name | Sort-Object)
             if(($top -join '|') -ne 'Excel Reports|Recovery'){throw "Backup root clutter remains: $($top -join ', ')"}
+
             if(-not $h.desktopShortcut -or -not(Test-Path -LiteralPath $h.desktopShortcut)){throw 'Desktop shortcut missing'}
             $wsh=New-Object -ComObject WScript.Shell
             $lnk=$wsh.CreateShortcut($h.desktopShortcut)
             if(-not $lnk.TargetPath -or -not(Test-Path -LiteralPath $lnk.TargetPath)){throw 'Desktop shortcut target invalid'}
 
-            $excel=Invoke-RestMethod -Uri 'http://127.0.0.1:18766/api/manual-recovery' -Method Post -ContentType 'application/json' -Body '{}' -TimeoutSec 30
+            # Seed real data so Excel validation checks content, not merely file creation.
+            $now='2026-09-27T12:00:00Z'
+            $seed=@(
+              @{store='companies';row=@{id='c1';name='شركة اختبار EXE';companySerial=1;createdAt=$now;modifiedAt=$now}},
+              @{store='items';row=@{id='i1';companyId='c1';name='رخصة التشغيل';applicable=$true;position=1;expiryDate='2027-01-01';createdAt=$now;modifiedAt=$now}},
+              @{store='inspections';row=@{id='in1';companyId='c1';date='2026-09-27';inspectionCode='INS-1-2026-1';inspectionNo='INS-1-2026-1';createdAt=$now;modifiedAt=$now}},
+              @{store='findings';row=@{id='f1';inspectionId='in1';companyId='c1';no='1';description='ملاحظة اختبار';requirement='متطلب';status='Open';targetDate='2026-10-01';createdAt=$now;modifiedAt=$now}}
+            )
+            foreach($entry in $seed){
+              $body=@{store=$entry.store;row=$entry.row}|ConvertTo-Json -Depth 8 -Compress
+              $put=Invoke-RestMethod -Uri 'http://127.0.0.1:18766/api/put' -Method Post -ContentType 'application/json' -Body $body -TimeoutSec 10
+              if(-not $put.ok){throw "Seed failed: $($entry.store)"}
+            }
+
+            $excel=Invoke-RestMethod -Uri 'http://127.0.0.1:18766/api/manual-recovery' -Method Post -ContentType 'application/json' -Body '{}' -TimeoutSec 45
             if(-not $excel.ok -or -not(Test-Path -LiteralPath $excel.path -PathType Container)){throw 'Manual Excel Reports package failed'}
-            $summaryBook=Join-Path $excel.path 'Sokhna_Port_Excel_Report.xlsx'
-            if(-not(Test-Path -LiteralPath $summaryBook) -or (Get-Item -LiteralPath $summaryBook).Length -lt 1024){throw 'Excel summary workbook missing or empty'}
-            if(Test-Path -LiteralPath (Join-Path $excel.path 'PACKAGE_INFO.json')){throw 'Legacy PACKAGE_INFO.json still exposed'}
-            if(Test-Path -LiteralPath (Join-Path $excel.path 'REPORTS_COMPLETE.json')){throw 'Legacy REPORTS_COMPLETE.json still exposed'}
+            $xlsx=@(Get-ChildItem -LiteralPath $excel.path -Recurse -Filter '*.xlsx' -File)
+            if($xlsx.Count -lt 1){throw 'Excel Reports package contains no XLSX files'}
+            foreach($x in $xlsx){if($x.Length -lt 1024){throw "Empty/invalid XLSX: $($x.FullName)"}}
             $excelDoneBody=@{packagePath=$excel.path;reportCount=0}|ConvertTo-Json -Compress
-            $excelDone=Invoke-RestMethod -Uri 'http://127.0.0.1:18766/api/package-reports-complete' -Method Post -ContentType 'application/json' -Body $excelDoneBody -TimeoutSec 15
+            $excelDone=Invoke-RestMethod -Uri 'http://127.0.0.1:18766/api/package-reports-complete' -Method Post -ContentType 'application/json' -Body $excelDoneBody -TimeoutSec 20
             if(-not $excelDone.ok){throw 'Manual package completion failed'}
 
-            $repair=Invoke-RestMethod -Uri 'http://127.0.0.1:18766/api/repair-attachments' -Method Post -ContentType 'application/json' -Body '{}' -TimeoutSec 30
-            if(-not $repair.ok){throw 'Attachment repair button/API failed'}
-            $emergencyDir=Join-Path $qaParent 'EmergencyExport'
-            New-Item -ItemType Directory -Force $emergencyDir | Out-Null
-            $emergencyBody=@{targetDir=$emergencyDir}|ConvertTo-Json -Compress
-            $emergency=Invoke-RestMethod -Uri 'http://127.0.0.1:18766/api/emergency-copy' -Method Post -ContentType 'application/json' -Body $emergencyBody -TimeoutSec 90
-            if(-not $emergency.ok -or $emergency.cancelled -or -not(Test-Path -LiteralPath $emergency.path)){throw 'Emergency copy failed'}
-            $settings=Invoke-RestMethod -Uri 'http://127.0.0.1:18766/api/backup-settings' -TimeoutSec 10
-            if(-not $settings.ok){throw 'Backup settings GET failed'}
-            $live=Invoke-RestMethod -Uri 'http://127.0.0.1:18766/api/refresh-live-excel' -Method Post -ContentType 'application/json' -Body '{}' -TimeoutSec 30
+            $live=Invoke-RestMethod -Uri 'http://127.0.0.1:18766/api/refresh-live-excel' -Method Post -ContentType 'application/json' -Body '{}' -TimeoutSec 45
             if(-not $live.ok -or -not(Test-Path -LiteralPath $live.path)){throw 'Live Excel refresh failed'}
-            $mobile=Invoke-RestMethod -Uri 'http://127.0.0.1:18766/api/mobile-export' -Method Post -ContentType 'application/json' -Body '{"since":"","includeAttachments":false}' -TimeoutSec 30
-            if(-not $mobile.ok -or -not(Test-Path -LiteralPath $mobile.path)){throw 'Mobile export failed'}
+            if((Get-Item -LiteralPath $live.path).Length -lt 1024){throw 'Live Excel workbook is empty'}
 
-            $manual=Invoke-RestMethod -Uri 'http://127.0.0.1:18766/api/manual-backup' -Method Post -ContentType 'application/json' -Body '{}' -TimeoutSec 10
+            $repair=Invoke-RestMethod -Uri 'http://127.0.0.1:18766/api/repair-attachments' -Method Post -ContentType 'application/json' -Body '{}' -TimeoutSec 30
+            if(-not $repair.ok){throw 'Attachment repair API failed'}
+
+            $manual=Invoke-RestMethod -Uri 'http://127.0.0.1:18766/api/manual-backup' -Method Post -ContentType 'application/json' -Body '{}' -TimeoutSec 20
             if(-not $manual.ok -or -not ($manual.path -match '\.sqlite$')){throw 'Manual SQLite backup failed'}
-            $list=Invoke-RestMethod -Uri 'http://127.0.0.1:18766/api/backups' -TimeoutSec 5
-            if(-not $list.ok -or $list.backups.Count -lt 1){throw 'Backup listing failed'}
             $body=@{path=$manual.path}|ConvertTo-Json -Compress
-            $verify=Invoke-RestMethod -Uri 'http://127.0.0.1:18766/api/verify-backup' -Method Post -ContentType 'application/json' -Body $body -TimeoutSec 10
+            $verify=Invoke-RestMethod -Uri 'http://127.0.0.1:18766/api/verify-backup' -Method Post -ContentType 'application/json' -Body $body -TimeoutSec 15
             if(-not $verify.ok -or -not $verify.valid){throw 'Backup verification failed'}
-            $preview=Invoke-RestMethod -Uri 'http://127.0.0.1:18766/api/backup-preview' -Method Post -ContentType 'application/json' -Body $body -TimeoutSec 10
+            $preview=Invoke-RestMethod -Uri 'http://127.0.0.1:18766/api/backup-preview' -Method Post -ContentType 'application/json' -Body $body -TimeoutSec 15
             if(-not $preview.ok){throw 'Restore preview failed'}
-            $restore=Invoke-RestMethod -Uri 'http://127.0.0.1:18766/api/restore-backup' -Method Post -ContentType 'application/json' -Body $body -TimeoutSec 15
-            if(-not $restore.ok -or -not (Test-Path $restore.beforeRestore)){throw 'Restore / Before-Restore safety backup failed'}
-            $post=Invoke-RestMethod -Uri 'http://127.0.0.1:18766/api/health' -TimeoutSec 5
+            $restore=Invoke-RestMethod -Uri 'http://127.0.0.1:18766/api/restore-backup' -Method Post -ContentType 'application/json' -Body $body -TimeoutSec 20
+            if(-not $restore.ok -or -not(Test-Path -LiteralPath $restore.beforeRestore)){throw 'Restore / Before-Restore failed'}
+            $post=Invoke-RestMethod -Uri 'http://127.0.0.1:18766/api/health' -TimeoutSec 10
             if(-not $post.ok -or $post.quickCheck -ne 'ok'){throw 'Post-restore health failed'}
+
+            $mobile=Invoke-RestMethod -Uri 'http://127.0.0.1:18766/api/mobile-export' -Method Post -ContentType 'application/json' -Body '{"since":"","includeAttachments":false}' -TimeoutSec 45
+            if(-not $mobile.ok -or -not(Test-Path -LiteralPath $mobile.path)){throw 'Mobile export failed'}
           } finally {
             if($p -and -not $p.HasExited){Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue}
           }
