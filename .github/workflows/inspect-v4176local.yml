@@ -46,6 +46,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: v4176-local-reviewed-bundle
-          path: build/v4176local
+          path: /tmp/v4176local
           if-no-files-found: error
           retention-days: 7
