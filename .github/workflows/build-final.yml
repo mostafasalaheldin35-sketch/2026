@@ -257,6 +257,9 @@ jobs:
 
       - name: Final local v4.8.17.6 QA
         shell: pwsh
+        env:
+          PYTHONUTF8: '1'
+          PYTHONIOENCODING: 'utf-8'
         run: |
           $ErrorActionPreference='Stop'
           python -m py_compile buildsrc/backend.py buildsrc/launcher.py buildsrc/v4175_backend_ext.py buildsrc/v4176_backend_ext.py buildsrc/test_v4175.py buildsrc/test_v4176.py buildsrc/test_http_v4176.py buildsrc/test_numbering_v4176.py
