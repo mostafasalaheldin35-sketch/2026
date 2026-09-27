@@ -1,4 +1,4 @@
-name: Export v4.8.17.4 clean backend
+name: Export v4.8.17.5 reviewed payload
 
 on:
   workflow_dispatch:
@@ -11,46 +11,25 @@ permissions:
 
 jobs:
   export:
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - name: Prepare v4.8.17.4 source
-        shell: pwsh
+      - name: Reconstruct reviewed payload
+        shell: bash
         run: |
-          $ErrorActionPreference='Stop'
-          tar -xzf 'Sokhna-Port-2026-Changes-Bundle.tgz' -C build
-          tar -xzf 'Sokhna-Port-2026-Review-Fix.tgz' -C build
-          python build/prepare_source.py
-          python build/apply_v2026.py
-          python build/apply_review_fix.py
-          @'
-          import base64
+          python - <<'PY'
+          import base64, tarfile
           from pathlib import Path
-          parts=sorted(Path('build').glob('v4172_*.b64'))
-          raw=base64.b64decode(''.join(p.read_text().strip() for p in parts),validate=True)
-          Path('v4172.tgz').write_bytes(raw)
-          '@ | Set-Content -Encoding UTF8 d1.py
-          python d1.py
-          tar -xzf v4172.tgz -C build
-          python build/apply_v4172.py
-          @'
-          import base64
-          from pathlib import Path
-          parts=sorted(Path('build').glob('v4174_*.b64'))
-          raw=base64.b64decode(''.join(p.read_text().strip() for p in parts),validate=True)
-          Path('v4174.tgz').write_bytes(raw)
-          '@ | Set-Content -Encoding UTF8 d2.py
-          python d2.py
-          tar -xzf v4174.tgz -C build
-          python build/apply_v4174.py
-          python build/apply_v4174_cli_root_fix.py
-          python -m py_compile buildsrc/backend.py
+          parts=sorted(Path('build').glob('v4175r_*.b64'))
+          raw=base64.b64decode(''.join(p.read_text().strip() for p in parts), validate=True)
+          Path('/tmp/r.tgz').write_bytes(raw)
+          Path('/tmp/r').mkdir(exist_ok=True)
+          with tarfile.open('/tmp/r.tgz','r:gz') as t:
+              t.extractall('/tmp/r')
+          PY
       - uses: actions/upload-artifact@v4
         with:
-          name: clean-v4174-backend
-          path: buildsrc/backend.py
+          name: reviewed-v4175-payload
+          path: /tmp/r
           if-no-files-found: error
           retention-days: 7
