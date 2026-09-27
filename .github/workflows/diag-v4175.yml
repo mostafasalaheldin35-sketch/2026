@@ -1,0 +1,41 @@
+name: Diagnose v4.8.17.5 bundle
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/diag-v4175.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Reconstruct and inspect
+        shell: pwsh
+        run: |
+          @'
+          import base64, hashlib, tarfile
+          from pathlib import Path
+          parts=sorted(Path('build').glob('v4175r_*.b64'))
+          encoded=''.join(p.read_text(encoding='utf-8').strip() for p in parts)
+          raw=base64.b64decode(encoded,validate=True)
+          print('bundle sha256',hashlib.sha256(raw).hexdigest(),'bytes',len(raw))
+          Path('diag-v4175.tgz').write_bytes(raw)
+          Path('diag-v4175').mkdir(exist_ok=True)
+          with tarfile.open('diag-v4175.tgz','r:gz') as t:
+              for m in t.getmembers():
+                  print('MEMBER',m.name,m.size)
+              t.extractall('diag-v4175')
+          p=Path('diag-v4175/apply_v4175.py')
+          print('--- APPLY START ---')
+          print(p.read_text(encoding='utf-8',errors='replace'))
+          print('--- APPLY END ---')
+          '@ | Set-Content -Encoding UTF8 diag_v4175.py
+          python diag_v4175.py
