@@ -41,3 +41,11 @@ jobs:
                   s=p.read_text(encoding='utf-8',errors='replace')
                   print(s[:18000].encode('unicode_escape').decode('ascii'))
           PY
+
+      - name: Export local v4.8.17.6 bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: v4176-local-reviewed-bundle
+          path: build/v4176local
+          if-no-files-found: error
+          retention-days: 7
