@@ -31,8 +31,15 @@ jobs:
               encoded=''.join(p.read_text(encoding='utf-8').strip() for p in parts)
               try:
                   raw=base64.b64decode(encoded,validate=True)
+                  mode='concat'
               except Exception as e:
-                  print(label,'B64_ERROR',repr(e)); return
+                  print(label,'B64_CONCAT_ERROR',repr(e))
+                  try:
+                      raw=b''.join(base64.b64decode(p.read_text(encoding='utf-8').strip(),validate=True) for p in parts)
+                      mode='per-part'
+                  except Exception as e2:
+                      print(label,'B64_PART_ERROR',repr(e2)); return
+              print(label,'B64_MODE',mode)
               print(label,'BUNDLE',hashlib.sha256(raw).hexdigest(),len(raw))
               tgz=Path(label+'.tgz'); tgz.write_bytes(raw)
               out=Path(label); out.mkdir(exist_ok=True)
