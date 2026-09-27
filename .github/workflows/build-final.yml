@@ -17,6 +17,7 @@ on:
       - 'build/apply_v4175_backend_fix.py'
       - 'build/apply_v4174_cli_root_fix.py'
       - 'build/v48176_bundle_*.b64'
+      - 'build/apply_v48176_emergency_fix.py'
       - '.github/workflows/build-final.yml'
 
 permissions:
@@ -251,6 +252,13 @@ jobs:
           python buildsrc/_v48176/apply_v48176.py
           if($LASTEXITCODE -ne 0){throw 'apply_v48176.py failed'}
 
+      - name: Apply v4.8.17.6 emergency-copy verification fix
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          python build/apply_v48176_emergency_fix.py
+          if($LASTEXITCODE -ne 0){throw 'emergency-copy verification fix failed'}
+
       - name: Final v4.8.17.6 QA
         shell: pwsh
         run: |
@@ -344,6 +352,11 @@ jobs:
 
             $repair=Invoke-RestMethod -Uri 'http://127.0.0.1:18766/api/repair-attachments' -Method Post -ContentType 'application/json' -Body '{}' -TimeoutSec 30
             if(-not $repair.ok){throw 'Attachment repair button/API failed'}
+            $emergencyDir=Join-Path $qaParent 'EmergencyExport'
+            New-Item -ItemType Directory -Force $emergencyDir | Out-Null
+            $emergencyBody=@{targetDir=$emergencyDir}|ConvertTo-Json -Compress
+            $emergency=Invoke-RestMethod -Uri 'http://127.0.0.1:18766/api/emergency-copy' -Method Post -ContentType 'application/json' -Body $emergencyBody -TimeoutSec 90
+            if(-not $emergency.ok -or $emergency.cancelled -or -not(Test-Path -LiteralPath $emergency.path)){throw 'Emergency copy failed'}
             $settings=Invoke-RestMethod -Uri 'http://127.0.0.1:18766/api/backup-settings' -TimeoutSec 10
             if(-not $settings.ok){throw 'Backup settings GET failed'}
             $live=Invoke-RestMethod -Uri 'http://127.0.0.1:18766/api/refresh-live-excel' -Method Post -ContentType 'application/json' -Body '{}' -TimeoutSec 30
