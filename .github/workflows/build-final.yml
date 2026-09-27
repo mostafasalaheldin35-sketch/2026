@@ -312,7 +312,7 @@ jobs:
             if($h.dataRoot -notmatch 'Sokhna Port Data'){throw "Data root is not canonical: $($h.dataRoot)"}
 
             $index=Invoke-WebRequest -Uri 'http://127.0.0.1:18766/app/index.html' -UseBasicParsing -TimeoutSec 3
-            if($index.StatusCode -ne 200 -or $index.Content -notmatch '4\.8\.17\.5-DESKTOP'){throw 'v4.8.17.6 index/version smoke failed'}
+            if($index.StatusCode -ne 200 -or $index.Content -notmatch '4\.8\.17\.6-DESKTOP'){throw 'v4.8.17.6 index/version smoke failed'}
             if($index.Content -notmatch 'v4175_patch\.js' -or $index.Content -notmatch 'v4175_patch\.css'){throw 'v4.8.17.5 assets missing'}
 
             $patch=Invoke-WebRequest -Uri 'http://127.0.0.1:18766/app/v4175_patch.js' -UseBasicParsing -TimeoutSec 3
