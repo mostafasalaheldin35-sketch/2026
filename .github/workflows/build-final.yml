@@ -181,6 +181,41 @@ jobs:
           python build/v4175r/apply_v4175.py
           if($LASTEXITCODE -ne 0){throw 'apply_v4175.py failed'}
 
+      - name: Normalize patched source text
+        shell: pwsh
+        run: |
+          @'
+          from pathlib import Path
+
+          def normalize(path):
+              p=Path(path)
+              b=p.read_bytes()
+              if b'\x00' not in b:
+                  print(path, 'UTF-8/no-NUL OK')
+                  return
+              candidates=[]
+              if b.startswith(b'\xff\xfe') or b.startswith(b'\xfe\xff'):
+                  candidates.append('utf-16')
+              candidates += ['utf-16-le','utf-16-be']
+              for enc in candidates:
+                  try:
+                      s=b.decode(enc)
+                  except UnicodeDecodeError:
+                      continue
+                  if '\x00' in s:
+                      continue
+                  if path.endswith('.py') and not any(t in s for t in ('import ','def ','class ')):
+                      continue
+                  p.write_text(s.lstrip('\ufeff'),encoding='utf-8',newline='\n')
+                  print(path, 'normalized from', enc, 'to UTF-8')
+                  return
+              raise SystemExit(f'{path}: NUL bytes present and no safe UTF-16 normalization matched')
+
+          for p in ['buildsrc/backend.py','buildsrc/launcher.py','buildsrc/test_v4175.py']:
+              normalize(p)
+          '@ | Set-Content -Encoding UTF8 build/normalize_v4175_text.py
+          python build/normalize_v4175_text.py
+
       - name: Final v4.8.17.5 QA
         shell: pwsh
         run: |
