@@ -1,0 +1,43 @@
+name: Inspect locally reviewed v4.8.17.6 bundle
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/inspect-v4176local.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Reconstruct and inspect local bundle
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          @'
+          import base64, hashlib
+          from pathlib import Path
+          parts=sorted(Path('build').glob('v4176local_*.b64'))
+          if len(parts) != 6:
+              raise SystemExit(f'Expected 6 local chunks, got {len(parts)}')
+          encoded=''.join(p.read_text(encoding='utf-8').strip() for p in parts)
+          raw=base64.b64decode(encoded, validate=True)
+          print('LOCAL_BUNDLE_SHA256='+hashlib.sha256(raw).hexdigest())
+          print('LOCAL_BUNDLE_BYTES='+str(len(raw)))
+          print('LOCAL_BUNDLE_MAGIC='+raw[:8].hex())
+          Path('v4176local.tar.xz').write_bytes(raw)
+          '@ | Set-Content -Encoding UTF8 build/inspect_local_bundle.py
+          python build/inspect_local_bundle.py
+          New-Item -ItemType Directory -Force build/v4176local | Out-Null
+          tar -xf v4176local.tar.xz -C build/v4176local
+          Get-ChildItem build/v4176local -Recurse -File | ForEach-Object { Write-Host ('LOCAL_FILE='+$_.FullName.Replace((Resolve-Path '.').Path+'\','')) }
+          if(-not(Test-Path 'build/v4176local/apply_v4176local.py')){throw 'apply_v4176local.py missing'}
+          if(-not(Test-Path 'build/v4176local/test_v4176local.py')){throw 'test_v4176local.py missing'}
+          python -m py_compile build/v4176local/apply_v4176local.py build/v4176local/test_v4176local.py
