@@ -25,6 +25,8 @@ on:
       - 'build/apply_v4178.py'
       - 'build/test_v4178.py'
       - 'build/check_xlsx_compat.py'
+      - 'build/v4179_bundle.b64'
+      - 'build/v4179_dashboard_fix.py'
       - '.github/workflows/build-final.yml'
 
 permissions:
@@ -363,25 +365,83 @@ jobs:
           node --check buildsrc/app/v4177_patch.js
           python buildsrc/test_v4178.py
 
+      - name: Reconstruct v4.8.17.9 consolidated bundle
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          @'
+          import base64, hashlib, tarfile
+          from pathlib import Path
+          src=Path('build/v4179_bundle.b64')
+          if not src.is_file():
+              raise SystemExit('Missing build/v4179_bundle.b64')
+          raw=base64.b64decode(src.read_text(encoding='utf-8').strip(), validate=True)
+          digest=hashlib.sha256(raw).hexdigest()
+          expected='acbb5ff23e675a393747ca7096b47ac6af1cd86c3234bcfae58d2dfb2a821ef7'
+          if digest != expected:
+              raise SystemExit(f'v4.8.17.9 bundle SHA mismatch: {digest}')
+          archive=Path('Sokhna-Port-v4.8.17.9-Consolidated.tgz')
+          archive.write_bytes(raw)
+          out=Path('build/v4179')
+          out.mkdir(parents=True,exist_ok=True)
+          with tarfile.open(archive,'r:gz') as t:
+              t.extractall(out)
+          for required in ('apply_v4179.py','test_v4179.py','v4179_backend_ext.py','v4179_patch.js','v4179_patch.css','sugar_template.b64'):
+              if not (out/required).is_file():
+                  raise SystemExit(f'Missing v4179 payload file: {required}')
+          print('v4.8.17.9 consolidated bundle verified:', digest)
+          '@ | Set-Content -Encoding UTF8 build/reconstruct_v4179.py
+          python build/reconstruct_v4179.py
+
+      - name: Apply v4.8.17.9 consolidated changes
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          Copy-Item 'build/v4179/apply_v4179.py' 'build/apply_v4179.py' -Force
+          Copy-Item 'build/v4179/test_v4179.py' 'build/test_v4179.py' -Force
+          Copy-Item 'build/v4179/v4179_backend_ext.py' 'build/v4179_backend_ext.py' -Force
+          Copy-Item 'build/v4179/v4179_patch.js' 'build/v4179_patch.js' -Force
+          Copy-Item 'build/v4179/v4179_patch.css' 'build/v4179_patch.css' -Force
+          Copy-Item 'build/v4179/sugar_template.b64' 'build/sugar_template.b64' -Force
+          python build/apply_v4179.py
+          if($LASTEXITCODE -ne 0){throw 'apply_v4179.py failed'}
+          python build/v4179_dashboard_fix.py
+          if($LASTEXITCODE -ne 0){throw 'v4179 dashboard safety fix failed'}
+          Copy-Item 'build/test_v4179.py' 'buildsrc/test_v4179.py' -Force
+
+      - name: Install v4.8.17.9 Excel dependency
+        run: python -m pip install --disable-pip-version-check openpyxl
+
+      - name: Final v4.8.17.9 QA
+        shell: pwsh
+        env:
+          PYTHONUTF8: '1'
+          PYTHONIOENCODING: 'utf-8'
+        run: |
+          $ErrorActionPreference='Stop'
+          python -m py_compile buildsrc/backend.py buildsrc/launcher.py buildsrc/v4179_backend_ext.py buildsrc/test_v4179.py
+          node --check buildsrc/app/v4179_patch.js
+          python buildsrc/test_v4179.py
+
       - name: Upload reviewed source snapshot
         uses: actions/upload-artifact@v4
         with:
-          name: reviewed-source-v4.8.17.8
+          name: reviewed-source-v4.8.17.9
           path: buildsrc
           if-no-files-found: error
           retention-days: 7
 
       - name: Install PyInstaller
-        run: python -m pip install --disable-pip-version-check pyinstaller
+        run: python -m pip install --disable-pip-version-check pyinstaller openpyxl
 
       - name: Build Windows EXE
         shell: pwsh
         run: |
           Set-Location buildsrc
-          python -m PyInstaller --noconfirm --clean --onefile --windowed --name 'Sokhna Port 2026 v4.8.17.8' --add-data 'app;app' launcher.py
-          if(-not(Test-Path 'dist/Sokhna Port 2026 v4.8.17.8.exe')){throw 'EXE was not created'}
-          Get-FileHash 'dist/Sokhna Port 2026 v4.8.17.8.exe' -Algorithm SHA256
-          Get-Item 'dist/Sokhna Port 2026 v4.8.17.8.exe' | Format-List Name,Length,LastWriteTime
+          python -m PyInstaller --noconfirm --clean --onefile --windowed --name 'Sokhna Port 2026 v4.8.17.9' --add-data 'app;app' launcher.py
+          if(-not(Test-Path 'dist/Sokhna Port 2026 v4.8.17.9.exe')){throw 'EXE was not created'}
+          Get-FileHash 'dist/Sokhna Port 2026 v4.8.17.9.exe' -Algorithm SHA256
+          Get-Item 'dist/Sokhna Port 2026 v4.8.17.9.exe' | Format-List Name,Length,LastWriteTime
 
       - name: Smoke-test final EXE
         shell: pwsh
@@ -389,7 +449,7 @@ jobs:
           $ErrorActionPreference='Stop'
           $qaParent=Join-Path $env:RUNNER_TEMP 'Sokhna2026SmokeParent'
           New-Item -ItemType Directory -Force $qaParent | Out-Null
-          $exe=Resolve-Path 'buildsrc/dist/Sokhna Port 2026 v4.8.17.8.exe'
+          $exe=Resolve-Path 'buildsrc/dist/Sokhna Port 2026 v4.8.17.9.exe'
           $p=Start-Process -FilePath $exe -ArgumentList @('--data-root',$qaParent,'--port','18766') -PassThru
           $ok=$false
           try {
@@ -397,7 +457,7 @@ jobs:
               Start-Sleep -Milliseconds 700
               try {
                 $h=Invoke-RestMethod -Uri 'http://127.0.0.1:18766/api/health' -TimeoutSec 2
-                if($h.ok -and $h.appVersion -eq '4.8.17.8-DESKTOP' -and $h.quickCheck -eq 'ok'){ $ok=$true; break }
+                if($h.ok -and $h.appVersion -eq '4.8.17.9-DESKTOP' -and $h.quickCheck -eq 'ok'){ $ok=$true; break }
               } catch {}
             }
             if(-not $ok){throw 'Final EXE health smoke test failed'}
@@ -459,12 +519,20 @@ jobs:
               if($LASTEXITCODE -ne 0){throw "Excel OOXML compatibility failed: $($x.FullName)"}
             }
             $live=Invoke-RestMethod -Uri 'http://127.0.0.1:18766/api/refresh-live-excel' -Method Post -ContentType 'application/json' -Body '{}' -TimeoutSec 45
-            if(-not $live.ok -or -not(Test-Path -LiteralPath $live.path)){throw 'Live Excel refresh failed'}
-            if(-not $live.audit.verifiedAgainstSQLite){throw 'Live Excel SQLite audit failed'}
-            if((Get-Item -LiteralPath $live.path).Length -lt 1024){throw 'Live Excel workbook is empty'}
+            if(-not $live.ok -or -not(Test-Path -LiteralPath $live.path -PathType Container)){throw 'Live Excel refresh failed'}
+            if(-not $live.audit.verifiedAgainstSQLite -or $live.audit.excelFiles -lt 1){throw 'Live Excel SQLite audit failed'}
+            $liveXlsx=@(Get-ChildItem -LiteralPath $live.path -Recurse -Filter '*.xlsx' -File)
+            if($liveXlsx.Count -lt 1){throw 'Live Excel folder contains no XLSX'}
+            foreach($x in $liveXlsx){
+              if($x.Length -lt 1024){throw "Empty Live XLSX: $($x.FullName)"}
+              python build/check_xlsx_compat.py $x.FullName
+              if($LASTEXITCODE -ne 0){throw "Live Excel OOXML compatibility failed: $($x.FullName)"}
+            }
 
-            $repair=Invoke-RestMethod -Uri 'http://127.0.0.1:18766/api/repair-attachments' -Method Post -ContentType 'application/json' -Body '{}' -TimeoutSec 30
-            if(-not $repair.ok){throw 'Attachment repair API failed'}
+            $settings=Invoke-RestMethod -Uri 'http://127.0.0.1:18766/api/v4179-settings' -TimeoutSec 10
+            if(-not $settings.ok -or $settings.dailyRetentionDays -ne 30){throw 'v4.8.17.9 retention settings failed'}
+            $att=Invoke-RestMethod -Uri 'http://127.0.0.1:18766/api/attachment-index' -TimeoutSec 10
+            if(-not $att.ok -or -not $att.audit.path){throw 'Attachment index audit failed'}
 
             $manual=Invoke-RestMethod -Uri 'http://127.0.0.1:18766/api/manual-backup' -Method Post -ContentType 'application/json' -Body '{}' -TimeoutSec 20
             if(-not $manual.ok -or -not ($manual.path -match '\.sqlite$')){throw 'Manual SQLite backup failed'}
@@ -487,7 +555,7 @@ jobs:
       - name: Upload final EXE
         uses: actions/upload-artifact@v4
         with:
-          name: Sokhna-Port-2026-Final-v4.8.17.8
-          path: buildsrc/dist/Sokhna Port 2026 v4.8.17.8.exe
+          name: Sokhna-Port-2026-Final-v4.8.17.9
+          path: buildsrc/dist/Sokhna Port 2026 v4.8.17.9.exe
           if-no-files-found: error
           retention-days: 30
