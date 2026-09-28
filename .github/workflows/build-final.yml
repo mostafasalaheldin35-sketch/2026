@@ -24,6 +24,7 @@ on:
       - 'build/v4178_backend_ext.py'
       - 'build/apply_v4178.py'
       - 'build/test_v4178.py'
+      - 'build/check_xlsx_compat.py'
       - '.github/workflows/build-final.yml'
 
 permissions:
@@ -453,21 +454,8 @@ jobs:
             $xlsx=@(Get-ChildItem -LiteralPath $excel.path -Recurse -Filter '*.xlsx' -File)
             if($xlsx.Count -lt 1){throw 'Excel Reports package contains no XLSX files'}
             foreach($x in $xlsx){if($x.Length -lt 1024){throw "Empty/invalid XLSX: $($x.FullName)"}}
-            $compatPy=Join-Path $env:RUNNER_TEMP 'check_xlsx_compat.py'
-            $compatCode=@'
-            import sys, zipfile
-            for p in sys.argv[1:]:
-                with zipfile.ZipFile(p,'r') as z:
-                    for n in z.namelist():
-                        if n.startswith('xl/worksheets/sheet') and n.endswith('.xml'):
-                            t=z.read(n).decode('utf-8')
-                            a=t.find('<autoFilter'); m=t.find('<mergeCells')
-                            if a>=0 and m>=0 and a>m:
-                                raise SystemExit(f'autoFilter must precede mergeCells in EXE workbook: {p} / {n}')
-            '@
-            Set-Content -Encoding UTF8 -LiteralPath $compatPy -Value $compatCode
             foreach($x in $xlsx){
-              python $compatPy $x.FullName
+              python build/check_xlsx_compat.py $x.FullName
               if($LASTEXITCODE -ne 0){throw "Excel OOXML compatibility failed: $($x.FullName)"}
             }
             $live=Invoke-RestMethod -Uri 'http://127.0.0.1:18766/api/refresh-live-excel' -Method Post -ContentType 'application/json' -Body '{}' -TimeoutSec 45
