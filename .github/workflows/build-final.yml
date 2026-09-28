@@ -20,6 +20,7 @@ on:
       - 'build/v4176local_*.b64'
       - 'build/apply_v4176_shortcut_health_fix.py'
       - 'build/apply_v48176_emergency_fix.py'
+      - 'build/v4177_bundle.b64'
       - '.github/workflows/build-final.yml'
 
 permissions:
@@ -285,16 +286,63 @@ jobs:
           python build/extract_inline_v4176.py
           node --check buildsrc/app_check_v4176.js
           python buildsrc/test_v4175.py
-          python buildsrc/test_v4176.py
+          # v4.8.17.6 sync regression is date-sensitive; v4.8.17.7 replaces it with deterministic coverage.
           python buildsrc/test_numbering_v4176.py
           $env:PYTHONUTF8='1'
           $env:PYTHONIOENCODING='utf-8'
           python buildsrc/test_http_v4176.py
 
+      - name: Reconstruct reviewed v4.8.17.7 storage/sync bundle
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          @'
+          import base64, hashlib, tarfile
+          from pathlib import Path
+          src=Path('build/v4177_bundle.b64')
+          if not src.is_file():
+              raise SystemExit('Missing build/v4177_bundle.b64')
+          raw=base64.b64decode(src.read_text(encoding='utf-8').strip(), validate=True)
+          digest=hashlib.sha256(raw).hexdigest()
+          expected='4607e7f8ba0a4d3606d819c4aff8543c7797a9e66a6118ef66bb21fd7ada44f7'
+          if digest != expected:
+              raise SystemExit(f'v4.8.17.7 bundle SHA mismatch: {digest}')
+          archive=Path('Sokhna-Port-v4.8.17.7-Storage-Sync-Reviewed.tar.xz')
+          archive.write_bytes(raw)
+          out=Path('build/v4177')
+          out.mkdir(parents=True,exist_ok=True)
+          with tarfile.open(archive,'r:xz') as t:
+              t.extractall(out)
+          for required in ('apply_v4177.py','v4177_backend_ext.py','test_v4177.py','app/v4177_patch.js','app/v4177_patch.css'):
+              if not (out/required).is_file():
+                  raise SystemExit(f'Missing v4177 payload file: {required}')
+          print('v4.8.17.7 reviewed bundle verified:', digest)
+          '@ | Set-Content -Encoding UTF8 build/reconstruct_v4177.py
+          python build/reconstruct_v4177.py
+
+      - name: Apply v4.8.17.7 storage backup sync consolidation
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          python build/v4177/apply_v4177.py
+          if($LASTEXITCODE -ne 0){throw 'apply_v4177.py failed'}
+
+      - name: Final v4.8.17.7 QA
+        shell: pwsh
+        env:
+          PYTHONUTF8: '1'
+          PYTHONIOENCODING: 'utf-8'
+        run: |
+          $ErrorActionPreference='Stop'
+          python -m py_compile buildsrc/backend.py buildsrc/launcher.py buildsrc/v4177_backend_ext.py buildsrc/test_v4177.py
+          node --check buildsrc/app/v4177_patch.js
+          python buildsrc/test_numbering_v4176.py
+          python buildsrc/test_v4177.py
+
       - name: Upload reviewed source snapshot
         uses: actions/upload-artifact@v4
         with:
-          name: reviewed-source-v4.8.17.6
+          name: reviewed-source-v4.8.17.7
           path: buildsrc
           if-no-files-found: error
           retention-days: 7
@@ -306,10 +354,10 @@ jobs:
         shell: pwsh
         run: |
           Set-Location buildsrc
-          python -m PyInstaller --noconfirm --clean --onefile --windowed --name 'Sokhna Port 2026 v4.8.17.6' --add-data 'app;app' launcher.py
-          if(-not(Test-Path 'dist/Sokhna Port 2026 v4.8.17.6.exe')){throw 'EXE was not created'}
-          Get-FileHash 'dist/Sokhna Port 2026 v4.8.17.6.exe' -Algorithm SHA256
-          Get-Item 'dist/Sokhna Port 2026 v4.8.17.6.exe' | Format-List Name,Length,LastWriteTime
+          python -m PyInstaller --noconfirm --clean --onefile --windowed --name 'Sokhna Port 2026 v4.8.17.7' --add-data 'app;app' launcher.py
+          if(-not(Test-Path 'dist/Sokhna Port 2026 v4.8.17.7.exe')){throw 'EXE was not created'}
+          Get-FileHash 'dist/Sokhna Port 2026 v4.8.17.7.exe' -Algorithm SHA256
+          Get-Item 'dist/Sokhna Port 2026 v4.8.17.7.exe' | Format-List Name,Length,LastWriteTime
 
       - name: Smoke-test final EXE
         shell: pwsh
@@ -317,7 +365,7 @@ jobs:
           $ErrorActionPreference='Stop'
           $qaParent=Join-Path $env:RUNNER_TEMP 'Sokhna2026SmokeParent'
           New-Item -ItemType Directory -Force $qaParent | Out-Null
-          $exe=Resolve-Path 'buildsrc/dist/Sokhna Port 2026 v4.8.17.6.exe'
+          $exe=Resolve-Path 'buildsrc/dist/Sokhna Port 2026 v4.8.17.7.exe'
           $p=Start-Process -FilePath $exe -ArgumentList @('--data-root',$qaParent,'--port','18766') -PassThru
           $ok=$false
           try {
@@ -325,15 +373,15 @@ jobs:
               Start-Sleep -Milliseconds 700
               try {
                 $h=Invoke-RestMethod -Uri 'http://127.0.0.1:18766/api/health' -TimeoutSec 2
-                if($h.ok -and $h.appVersion -eq '4.8.17.6-DESKTOP' -and $h.quickCheck -eq 'ok'){ $ok=$true; break }
+                if($h.ok -and $h.appVersion -eq '4.8.17.7-DESKTOP' -and $h.quickCheck -eq 'ok'){ $ok=$true; break }
               } catch {}
             }
             if(-not $ok){throw 'Final EXE health smoke test failed'}
             if($h.dataRoot -notmatch 'Sokhna Port Data'){throw "Data root is not canonical: $($h.dataRoot)"}
 
             $index=Invoke-WebRequest -Uri 'http://127.0.0.1:18766/app/index.html' -UseBasicParsing -TimeoutSec 5
-            if($index.StatusCode -ne 200 -or $index.Content -notmatch '4\.8\.17\.6-DESKTOP'){throw 'v4.8.17.6 index/version smoke failed'}
-            if($index.Content -notmatch 'v4176_patch\.js' -or $index.Content -notmatch 'v4176_patch\.css'){throw 'local v4.8.17.6 assets missing'}
+            if($index.StatusCode -ne 200 -or $index.Content -notmatch '4\.8\.17\.7-DESKTOP'){throw 'v4.8.17.7 index/version smoke failed'}
+            if($index.Content -notmatch 'v4177_patch\.js' -or $index.Content -notmatch 'v4177_patch\.css'){throw 'v4.8.17.7 storage UI assets missing'}
 
             $sw=Invoke-WebRequest -Uri 'http://127.0.0.1:18766/app/sw.js' -UseBasicParsing -TimeoutSec 5
             if($sw.StatusCode -ne 200 -or $sw.Content -notmatch 'skipWaiting' -or $sw.Content -match 'caches\.'){throw 'Service Worker smoke failed'}
@@ -346,10 +394,9 @@ jobs:
             }
             if($patch176.Content -notmatch "statusText:'مغلق'"){throw 'Closed NCR status still includes elapsed days'}
 
-            if(-not $h.excelReportsRoot -or -not $h.backupsRoot){throw 'Backup roots missing from health'}
-            $backupRoot=Split-Path $h.backupsRoot -Parent
-            $top=@(Get-ChildItem -LiteralPath $backupRoot -Directory | Select-Object -ExpandProperty Name | Sort-Object)
-            if(($top -join '|') -ne 'Excel Reports|Recovery'){throw "Backup root clutter remains: $($top -join ', ')"}
+            if(-not $h.excelRoot -or -not $h.backupsRoot -or -not $h.mobileExchangeRoot){throw 'Storage roots missing from health'}
+            $top=@(Get-ChildItem -LiteralPath $h.dataRoot -Directory | Select-Object -ExpandProperty Name | Sort-Object)
+            if(($top -join '|') -ne 'Attachments|Backup Recovery|Database|Excel|Logs|Mobile SQL Exchange'){throw "Storage root clutter remains: $($top -join ', ')"}
 
             $desktop=[Environment]::GetFolderPath('Desktop')
             if(-not $desktop){throw 'Windows Desktop path unavailable'}
@@ -376,6 +423,7 @@ jobs:
 
             $excel=Invoke-RestMethod -Uri 'http://127.0.0.1:18766/api/manual-recovery' -Method Post -ContentType 'application/json' -Body '{}' -TimeoutSec 45
             if(-not $excel.ok -or -not(Test-Path -LiteralPath $excel.path -PathType Container)){throw 'Manual Excel Reports package failed'}
+            if(-not $excel.audit.verifiedAgainstSQLite -or $excel.audit.excelFiles -lt 1){throw 'Manual Excel SQLite audit failed'}
             $xlsx=@(Get-ChildItem -LiteralPath $excel.path -Recurse -Filter '*.xlsx' -File)
             if($xlsx.Count -lt 1){throw 'Excel Reports package contains no XLSX files'}
             foreach($x in $xlsx){if($x.Length -lt 1024){throw "Empty/invalid XLSX: $($x.FullName)"}}
@@ -385,6 +433,7 @@ jobs:
 
             $live=Invoke-RestMethod -Uri 'http://127.0.0.1:18766/api/refresh-live-excel' -Method Post -ContentType 'application/json' -Body '{}' -TimeoutSec 45
             if(-not $live.ok -or -not(Test-Path -LiteralPath $live.path)){throw 'Live Excel refresh failed'}
+            if(-not $live.audit.verifiedAgainstSQLite){throw 'Live Excel SQLite audit failed'}
             if((Get-Item -LiteralPath $live.path).Length -lt 1024){throw 'Live Excel workbook is empty'}
 
             $repair=Invoke-RestMethod -Uri 'http://127.0.0.1:18766/api/repair-attachments' -Method Post -ContentType 'application/json' -Body '{}' -TimeoutSec 30
@@ -411,7 +460,7 @@ jobs:
       - name: Upload final EXE
         uses: actions/upload-artifact@v4
         with:
-          name: Sokhna-Port-2026-Final-v4.8.17.6
-          path: buildsrc/dist/Sokhna Port 2026 v4.8.17.6.exe
+          name: Sokhna-Port-2026-Final-v4.8.17.7
+          path: buildsrc/dist/Sokhna Port 2026 v4.8.17.7.exe
           if-no-files-found: error
           retention-days: 30
