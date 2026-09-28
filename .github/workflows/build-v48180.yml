@@ -1,0 +1,150 @@
+name: Build Sokhna Port 2026 v4.8.18.0
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'build/apply_v48180.py'
+      - 'build/test_v48180.py'
+      - 'build/test_v48180_http.py'
+      - 'build/test_v48180_ui.py'
+      - 'build/test_v48180_exe_ui.py'
+      - '.github/workflows/build-v48180.yml'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  build-test-package:
+    runs-on: windows-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Restore reviewed v4.8.17.9 source snapshot
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force buildsrc | Out-Null
+          gh run download 36455030685 -n reviewed-source-v4.8.17.9 -D buildsrc
+          if(-not(Test-Path 'buildsrc/backend.py')){throw 'Reviewed v4.8.17.9 source artifact was not restored'}
+          if(-not(Test-Path 'buildsrc/app/v4179_patch.js')){throw 'v4.8.17.9 UI patch missing from restored source'}
+
+      - name: Apply v4.8.18.0 stability corrections
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          python build/apply_v48180.py
+          Copy-Item build/test_v48180.py buildsrc/test_v48180.py -Force
+          Copy-Item build/test_v48180_http.py buildsrc/test_v48180_http.py -Force
+          Copy-Item build/test_v48180_ui.py buildsrc/test_v48180_ui.py -Force
+
+      - name: Install QA dependencies
+        run: python -m pip install --disable-pip-version-check openpyxl playwright
+
+      - name: Static syntax and compile QA
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          python -m py_compile buildsrc/backend.py buildsrc/launcher.py buildsrc/v4175_backend_ext.py buildsrc/v4176_backend_ext.py buildsrc/v4177_backend_ext.py buildsrc/v4178_backend_ext.py buildsrc/v4179_backend_ext.py buildsrc/test_v48180.py buildsrc/test_v48180_http.py buildsrc/test_v48180_ui.py
+          Get-ChildItem buildsrc/app -Filter '*.js' | ForEach-Object { node --check $_.FullName; if($LASTEXITCODE -ne 0){throw "JS syntax failed: $($_.Name)"} }
+
+      - name: v4.8.18.0 core and storage QA
+        env:
+          PYTHONUTF8: '1'
+          PYTHONIOENCODING: 'utf-8'
+        run: python buildsrc/test_v48180.py
+
+      - name: v4.8.18.0 HTTP and concurrency QA
+        env:
+          PYTHONUTF8: '1'
+          PYTHONIOENCODING: 'utf-8'
+        run: python buildsrc/test_v48180_http.py
+
+      - name: v4.8.18.0 browser regression QA
+        env:
+          PYTHONUTF8: '1'
+          PYTHONIOENCODING: 'utf-8'
+        run: python buildsrc/test_v48180_ui.py
+
+      - name: Upload reviewed source snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: reviewed-source-v4.8.18.0
+          path: buildsrc
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Install PyInstaller
+        run: python -m pip install --disable-pip-version-check pyinstaller
+
+      - name: Build Windows EXE
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          Set-Location buildsrc
+          python -m PyInstaller --noconfirm --clean --onefile --windowed --name 'Sokhna Port 2026 v4.8.18.0' --add-data 'app;app' launcher.py
+          if(-not(Test-Path 'dist/Sokhna Port 2026 v4.8.18.0.exe')){throw 'EXE was not created'}
+          Get-FileHash 'dist/Sokhna Port 2026 v4.8.18.0.exe' -Algorithm SHA256
+          Get-Item 'dist/Sokhna Port 2026 v4.8.18.0.exe' | Format-List Name,Length,LastWriteTime
+
+      - name: Smoke-test packaged EXE and real Edge UI
+        shell: pwsh
+        env:
+          PYTHONUTF8: '1'
+          PYTHONIOENCODING: 'utf-8'
+        run: |
+          $ErrorActionPreference='Stop'
+          $qaParent=Join-Path $env:RUNNER_TEMP 'Sokhna48180SmokeParent'
+          New-Item -ItemType Directory -Force $qaParent | Out-Null
+          $exe=Resolve-Path 'buildsrc/dist/Sokhna Port 2026 v4.8.18.0.exe'
+          $p=Start-Process -FilePath $exe -ArgumentList @('--data-root',$qaParent,'--port','18766','--no-browser') -PassThru
+          try {
+            $h=$null
+            for($i=0;$i -lt 60;$i++){
+              Start-Sleep -Milliseconds 600
+              try {$h=Invoke-RestMethod -Uri 'http://127.0.0.1:18766/api/health' -TimeoutSec 2;if($h.ok){break}}catch{}
+            }
+            if(-not $h -or -not $h.ok){throw 'Packaged EXE health did not become ready'}
+            if($h.appVersion -ne '4.8.18.0-DESKTOP' -or $h.quickCheck -ne 'ok'){throw "Wrong EXE health/version: $($h.appVersion) / $($h.quickCheck)"}
+            $top=@(Get-ChildItem -LiteralPath $h.dataRoot -Directory | Select-Object -ExpandProperty Name | Sort-Object)
+            if(($top -join '|') -ne 'Attachments|Backup Recovery|Database|Excel|Logs|Mobile SQL Exchange'){throw "Storage root clutter: $($top -join ', ')"}
+            $now='2026-09-29T12:00:00Z'
+            $seed=@(
+              @{store='companies';row=@{id='c1';name='شركة اختبار EXE 4.8.18';companySerial=1;createdAt=$now;modifiedAt=$now}},
+              @{store='items';row=@{id='i1';companyId='c1';name='رخصة التشغيل';applicable=$true;position=1;expiryDate='2027-01-01';createdAt=$now;modifiedAt=$now}},
+              @{store='inspections';row=@{id='in1';companyId='c1';date='2026-09-29';inspectionCode='INS-1-2026-1';inspectionNo='INS-1-2026-1';createdAt=$now;modifiedAt=$now}},
+              @{store='findings';row=@{id='f1';inspectionId='in1';companyId='c1';no='1';description='ملاحظة EXE';requirement='متطلب';status='Open';createdAt=$now;modifiedAt=$now}}
+            )
+            foreach($entry in $seed){
+              $body=@{store=$entry.store;row=$entry.row}|ConvertTo-Json -Depth 8 -Compress
+              $r=Invoke-RestMethod -Uri 'http://127.0.0.1:18766/api/put' -Method Post -ContentType 'application/json' -Body $body -TimeoutSec 10
+              if(-not $r.ok){throw "EXE seed failed: $($entry.store)"}
+            }
+            $excel=Invoke-RestMethod -Uri 'http://127.0.0.1:18766/api/manual-recovery' -Method Post -ContentType 'application/json' -Body '{}' -TimeoutSec 60
+            if(-not $excel.ok -or -not $excel.audit.verifiedAgainstSQLite -or $excel.audit.excelFiles -lt 1){throw 'EXE Excel audit failed'}
+            $manual=Invoke-RestMethod -Uri 'http://127.0.0.1:18766/api/manual-backup' -Method Post -ContentType 'application/json' -Body '{}' -TimeoutSec 30
+            if(-not $manual.ok -or -not(Test-Path -LiteralPath $manual.path)){throw 'EXE manual backup failed'}
+            $body=@{path=$manual.path}|ConvertTo-Json -Compress
+            $verify=Invoke-RestMethod -Uri 'http://127.0.0.1:18766/api/verify-backup' -Method Post -ContentType 'application/json' -Body $body -TimeoutSec 20
+            if(-not $verify.valid){throw 'EXE backup verification failed'}
+            python build/test_v48180_exe_ui.py 'http://127.0.0.1:18766/app/index.html'
+            if($LASTEXITCODE -ne 0){throw 'Packaged EXE Edge UI regression failed'}
+          } finally {
+            if($p -and -not $p.HasExited){Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue}
+          }
+
+      - name: Upload final EXE
+        uses: actions/upload-artifact@v4
+        with:
+          name: Sokhna-Port-2026-Final-v4.8.18.0
+          path: buildsrc/dist/Sokhna Port 2026 v4.8.18.0.exe
+          if-no-files-found: error
+          retention-days: 30
