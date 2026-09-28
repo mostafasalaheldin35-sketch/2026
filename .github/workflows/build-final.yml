@@ -26,6 +26,11 @@ on:
       - 'build/test_v4178.py'
       - 'build/check_xlsx_compat.py'
       - 'build/v4179_bundle.b64'
+      - 'build/v4179c_00.b64'
+      - 'build/v4179c_01.b64'
+      - 'build/v4179c_02.b64'
+      - 'build/v4179c_03.b64'
+      - 'build/v4179c_04.b64'
       - 'build/v4179_dashboard_fix.py'
       - '.github/workflows/build-final.yml'
 
@@ -372,12 +377,14 @@ jobs:
           @'
           import base64, hashlib, tarfile
           from pathlib import Path
-          src=Path('build/v4179_bundle.b64')
-          if not src.is_file():
-              raise SystemExit('Missing build/v4179_bundle.b64')
-          raw=base64.b64decode(src.read_text(encoding='utf-8').strip(), validate=True)
+          parts=[Path(f'build/v4179c_{i:02d}.b64') for i in range(5)]
+          for part in parts:
+              if not part.is_file():
+                  raise SystemExit(f'Missing {part}')
+          encoded=''.join(part.read_text(encoding='utf-8').strip() for part in parts)
+          raw=base64.b64decode(encoded, validate=True)
           digest=hashlib.sha256(raw).hexdigest()
-          expected='acbb5ff23e675a393747ca7096b47ac6af1cd86c3234bcfae58d2dfb2a821ef7'
+          expected='0c2d0d8624d9e4d443c3218af2f2f53f384f685cc9e4dc38560661b640d95f36'
           if digest != expected:
               raise SystemExit(f'v4.8.17.9 bundle SHA mismatch: {digest}')
           archive=Path('Sokhna-Port-v4.8.17.9-Consolidated.tgz')
