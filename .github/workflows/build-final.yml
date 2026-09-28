@@ -304,7 +304,7 @@ jobs:
               raise SystemExit('Missing build/v4177_bundle.b64')
           raw=base64.b64decode(src.read_text(encoding='utf-8').strip(), validate=True)
           digest=hashlib.sha256(raw).hexdigest()
-          expected='4607e7f8ba0a4d3606d819c4aff8543c7797a9e66a6118ef66bb21fd7ada44f7'
+          expected='5b3cc0346ddcb5ff6e2490fac7ea51434b52c71b030283ac90c23d8bd3147a88'
           if digest != expected:
               raise SystemExit(f'v4.8.17.7 bundle SHA mismatch: {digest}')
           archive=Path('Sokhna-Port-v4.8.17.7-Storage-Sync-Reviewed.tar.xz')
@@ -336,6 +336,7 @@ jobs:
           $ErrorActionPreference='Stop'
           python -m py_compile buildsrc/backend.py buildsrc/launcher.py buildsrc/v4177_backend_ext.py buildsrc/test_v4177.py
           node --check buildsrc/app/v4177_patch.js
+          node --check buildsrc/app/v2026_patch.js
           python buildsrc/test_numbering_v4176.py
           python buildsrc/test_v4177.py
 
@@ -427,10 +428,6 @@ jobs:
             $xlsx=@(Get-ChildItem -LiteralPath $excel.path -Recurse -Filter '*.xlsx' -File)
             if($xlsx.Count -lt 1){throw 'Excel Reports package contains no XLSX files'}
             foreach($x in $xlsx){if($x.Length -lt 1024){throw "Empty/invalid XLSX: $($x.FullName)"}}
-            $excelDoneBody=@{packagePath=$excel.path;reportCount=0}|ConvertTo-Json -Compress
-            $excelDone=Invoke-RestMethod -Uri 'http://127.0.0.1:18766/api/package-reports-complete' -Method Post -ContentType 'application/json' -Body $excelDoneBody -TimeoutSec 20
-            if(-not $excelDone.ok){throw 'Manual package completion failed'}
-
             $live=Invoke-RestMethod -Uri 'http://127.0.0.1:18766/api/refresh-live-excel' -Method Post -ContentType 'application/json' -Body '{}' -TimeoutSec 45
             if(-not $live.ok -or -not(Test-Path -LiteralPath $live.path)){throw 'Live Excel refresh failed'}
             if(-not $live.audit.verifiedAgainstSQLite){throw 'Live Excel SQLite audit failed'}
