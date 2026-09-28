@@ -31,58 +31,57 @@ def install(ns: Dict[str, Any]) -> None:
         try:
             with zipfile.ZipFile(path, "r") as zin:
                 infos = zin.infolist()
-                for info in infos:
-                    name = info.filename
-                    if not (name.startswith("xl/worksheets/sheet") and name.endswith(".xml")):
-                        continue
-                    raw = zin.read(name)
-                    try:
-                        text = raw.decode("utf-8")
-                    except UnicodeDecodeError:
-                        continue
-                    m1 = text.find("<mergeCells")
-                    m2 = text.find("</mergeCells>")
-                    a1 = text.find("<autoFilter")
-                    if m1 < 0 or m2 < 0 or a1 < 0 or m1 > a1:
-                        continue
-                    a2 = text.find("/>", a1)
-                    if a2 < 0:
-                        a2 = text.find("</autoFilter>", a1)
-                        if a2 < 0:
-                            continue
-                        a2 += len("</autoFilter>") - 1
-                    else:
-                        a2 += 1
-                    merge_block = text[m1:m2 + len("</mergeCells>")]
-                    auto_block = text[a1:a2 + 1]
-                    # Remove later block first to keep indexes stable.
-                    pieces = [(m1, m2 + len("</mergeCells>")), (a1, a2 + 1)]
-                    for start, end in sorted(pieces, reverse=True):
-                        text = text[:start] + text[end:]
-                    insert_at = text.find("</sheetData>")
-                    if insert_at < 0:
-                        continue
-                    insert_at += len("</sheetData>")
-                    text = text[:insert_at] + auto_block + merge_block + text[insert_at:]
-                    changed[name] = text.encode("utf-8")
-                if not changed:
-                    return False
-                fd, tmp_name = tempfile.mkstemp(prefix=path.stem + "_compat_", suffix=".xlsx", dir=str(path.parent))
-                os.close(fd)
-                tmp = Path(tmp_name)
+                payloads = {info.filename: zin.read(info.filename) for info in infos}
+            for info in infos:
+                name = info.filename
+                if not (name.startswith("xl/worksheets/sheet") and name.endswith(".xml")):
+                    continue
+                raw = payloads[name]
                 try:
-                    with zipfile.ZipFile(tmp, "w") as zout:
-                        for info in infos:
-                            data = changed.get(info.filename)
-                            if data is None:
-                                data = zin.read(info.filename)
-                            zout.writestr(info, data)
-                    os.replace(tmp, path)
-                finally:
-                    try:
-                        tmp.unlink(missing_ok=True)
-                    except Exception:
-                        pass
+                    text = raw.decode("utf-8")
+                except UnicodeDecodeError:
+                    continue
+                m1 = text.find("<mergeCells")
+                m2 = text.find("</mergeCells>")
+                a1 = text.find("<autoFilter")
+                if m1 < 0 or m2 < 0 or a1 < 0 or m1 > a1:
+                    continue
+                a2 = text.find("/>", a1)
+                if a2 < 0:
+                    a2 = text.find("</autoFilter>", a1)
+                    if a2 < 0:
+                        continue
+                    a2 += len("</autoFilter>") - 1
+                else:
+                    a2 += 1
+                merge_block = text[m1:m2 + len("</mergeCells>")]
+                auto_block = text[a1:a2 + 1]
+                # Remove later block first to keep indexes stable.
+                pieces = [(m1, m2 + len("</mergeCells>")), (a1, a2 + 1)]
+                for start, end in sorted(pieces, reverse=True):
+                    text = text[:start] + text[end:]
+                insert_at = text.find("</sheetData>")
+                if insert_at < 0:
+                    continue
+                insert_at += len("</sheetData>")
+                text = text[:insert_at] + auto_block + merge_block + text[insert_at:]
+                changed[name] = text.encode("utf-8")
+            if not changed:
+                return False
+            fd, tmp_name = tempfile.mkstemp(prefix=path.stem + "_compat_", suffix=".xlsx", dir=str(path.parent))
+            os.close(fd)
+            tmp = Path(tmp_name)
+            try:
+                with zipfile.ZipFile(tmp, "w") as zout:
+                    for info in infos:
+                        zout.writestr(info, changed.get(info.filename, payloads[info.filename]))
+                # Important on Windows: the input ZIP is closed before replacement.
+                os.replace(tmp, path)
+            finally:
+                try:
+                    tmp.unlink(missing_ok=True)
+                except Exception:
+                    pass
             return True
         except (zipfile.BadZipFile, OSError):
             return False
