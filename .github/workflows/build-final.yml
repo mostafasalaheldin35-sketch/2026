@@ -403,7 +403,7 @@ jobs:
             if($h.dataRoot -notmatch 'Sokhna Port Data'){throw "Data root is not canonical: $($h.dataRoot)"}
 
             $index=Invoke-WebRequest -Uri 'http://127.0.0.1:18766/app/index.html' -UseBasicParsing -TimeoutSec 5
-            if($index.StatusCode -ne 200 -or $index.Content -notmatch '4\.8\.17\.7-DESKTOP'){throw 'v4.8.17.7 index/version smoke failed'}
+            if($index.StatusCode -ne 200 -or $index.Content -notmatch '4\.8\.17\.8-DESKTOP'){throw 'v4.8.17.8 index/version smoke failed'}
             if($index.Content -notmatch 'v4177_patch\.js' -or $index.Content -notmatch 'v4177_patch\.css'){throw 'v4.8.17.7 storage UI assets missing'}
 
             $sw=Invoke-WebRequest -Uri 'http://127.0.0.1:18766/app/sw.js' -UseBasicParsing -TimeoutSec 5
@@ -454,7 +454,7 @@ jobs:
             if($xlsx.Count -lt 1){throw 'Excel Reports package contains no XLSX files'}
             foreach($x in $xlsx){if($x.Length -lt 1024){throw "Empty/invalid XLSX: $($x.FullName)"}}
             $compatPy=Join-Path $env:RUNNER_TEMP 'check_xlsx_compat.py'
-            @'
+            $compatCode=@'
             import sys, zipfile
             for p in sys.argv[1:]:
                 with zipfile.ZipFile(p,'r') as z:
@@ -464,7 +464,8 @@ jobs:
                             a=t.find('<autoFilter'); m=t.find('<mergeCells')
                             if a>=0 and m>=0 and a>m:
                                 raise SystemExit(f'autoFilter must precede mergeCells in EXE workbook: {p} / {n}')
-            '@ | Set-Content -Encoding UTF8 $compatPy
+            '@
+            Set-Content -Encoding UTF8 -LiteralPath $compatPy -Value $compatCode
             foreach($x in $xlsx){
               python $compatPy $x.FullName
               if($LASTEXITCODE -ne 0){throw "Excel OOXML compatibility failed: $($x.FullName)"}
