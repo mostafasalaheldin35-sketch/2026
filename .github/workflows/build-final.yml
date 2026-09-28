@@ -384,7 +384,7 @@ jobs:
           encoded=''.join(part.read_text(encoding='utf-8').strip() for part in parts)
           raw=base64.b64decode(encoded, validate=True)
           digest=hashlib.sha256(raw).hexdigest()
-          expected='324406014c8b7f17f73ba48c06c88cec0b41a57211df080bf1df5177be16fbc2'
+          expected='0c2d0d8624d9e4d443c3218af2f2f53f384f685cc9e4dc38560661b640d95f36'
           if digest != expected:
               raise SystemExit(f'v4.8.17.9 bundle SHA mismatch: {digest}')
           archive=Path('Sokhna-Port-v4.8.17.9-Consolidated.tgz')
