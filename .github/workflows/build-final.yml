@@ -21,6 +21,9 @@ on:
       - 'build/apply_v4176_shortcut_health_fix.py'
       - 'build/apply_v48176_emergency_fix.py'
       - 'build/v4177_bundle.b64'
+      - 'build/v4178_backend_ext.py'
+      - 'build/apply_v4178.py'
+      - 'build/test_v4178.py'
       - '.github/workflows/build-final.yml'
 
 permissions:
@@ -340,10 +343,29 @@ jobs:
           python buildsrc/test_numbering_v4176.py
           python buildsrc/test_v4177.py
 
+      - name: Apply v4.8.17.8 Excel and shortcut hotfix
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          python build/apply_v4178.py
+          if($LASTEXITCODE -ne 0){throw 'apply_v4178.py failed'}
+          Copy-Item 'build/test_v4178.py' 'buildsrc/test_v4178.py' -Force
+
+      - name: Final v4.8.17.8 QA
+        shell: pwsh
+        env:
+          PYTHONUTF8: '1'
+          PYTHONIOENCODING: 'utf-8'
+        run: |
+          $ErrorActionPreference='Stop'
+          python -m py_compile buildsrc/backend.py buildsrc/launcher.py buildsrc/v4178_backend_ext.py buildsrc/test_v4178.py
+          node --check buildsrc/app/v4177_patch.js
+          python buildsrc/test_v4178.py
+
       - name: Upload reviewed source snapshot
         uses: actions/upload-artifact@v4
         with:
-          name: reviewed-source-v4.8.17.7
+          name: reviewed-source-v4.8.17.8
           path: buildsrc
           if-no-files-found: error
           retention-days: 7
@@ -356,9 +378,9 @@ jobs:
         run: |
           Set-Location buildsrc
           python -m PyInstaller --noconfirm --clean --onefile --windowed --name 'Sokhna Port 2026 v4.8.17.7' --add-data 'app;app' launcher.py
-          if(-not(Test-Path 'dist/Sokhna Port 2026 v4.8.17.7.exe')){throw 'EXE was not created'}
-          Get-FileHash 'dist/Sokhna Port 2026 v4.8.17.7.exe' -Algorithm SHA256
-          Get-Item 'dist/Sokhna Port 2026 v4.8.17.7.exe' | Format-List Name,Length,LastWriteTime
+          if(-not(Test-Path 'dist/Sokhna Port 2026 v4.8.17.8.exe')){throw 'EXE was not created'}
+          Get-FileHash 'dist/Sokhna Port 2026 v4.8.17.8.exe' -Algorithm SHA256
+          Get-Item 'dist/Sokhna Port 2026 v4.8.17.8.exe' | Format-List Name,Length,LastWriteTime
 
       - name: Smoke-test final EXE
         shell: pwsh
@@ -366,7 +388,7 @@ jobs:
           $ErrorActionPreference='Stop'
           $qaParent=Join-Path $env:RUNNER_TEMP 'Sokhna2026SmokeParent'
           New-Item -ItemType Directory -Force $qaParent | Out-Null
-          $exe=Resolve-Path 'buildsrc/dist/Sokhna Port 2026 v4.8.17.7.exe'
+          $exe=Resolve-Path 'buildsrc/dist/Sokhna Port 2026 v4.8.17.8.exe'
           $p=Start-Process -FilePath $exe -ArgumentList @('--data-root',$qaParent,'--port','18766') -PassThru
           $ok=$false
           try {
@@ -374,7 +396,7 @@ jobs:
               Start-Sleep -Milliseconds 700
               try {
                 $h=Invoke-RestMethod -Uri 'http://127.0.0.1:18766/api/health' -TimeoutSec 2
-                if($h.ok -and $h.appVersion -eq '4.8.17.7-DESKTOP' -and $h.quickCheck -eq 'ok'){ $ok=$true; break }
+                if($h.ok -and $h.appVersion -eq '4.8.17.8-DESKTOP' -and $h.quickCheck -eq 'ok'){ $ok=$true; break }
               } catch {}
             }
             if(-not $ok){throw 'Final EXE health smoke test failed'}
@@ -402,11 +424,14 @@ jobs:
             $desktop=[Environment]::GetFolderPath('Desktop')
             if(-not $desktop){throw 'Windows Desktop path unavailable'}
             $shortcut=Join-Path $desktop 'Sokhna Port.lnk'
-            if(-not(Test-Path -LiteralPath $shortcut)){throw "Desktop shortcut missing: $shortcut"}
-            $wsh=New-Object -ComObject WScript.Shell
-            $lnk=$wsh.CreateShortcut($shortcut)
-            if(-not $lnk.TargetPath -or -not(Test-Path -LiteralPath $lnk.TargetPath)){throw 'Desktop shortcut target invalid'}
-            if([IO.Path]::GetFileName($lnk.TargetPath) -ne 'Sokhna Port.exe'){throw "Desktop shortcut points to wrong target: $($lnk.TargetPath)"}
+            $fallback=Join-Path $desktop 'Sokhna Port.cmd'
+            if(-not(Test-Path -LiteralPath $shortcut) -and -not(Test-Path -LiteralPath $fallback)){throw "Desktop launcher missing: $shortcut / $fallback"}
+            if(Test-Path -LiteralPath $shortcut){
+              $wsh=New-Object -ComObject WScript.Shell
+              $lnk=$wsh.CreateShortcut($shortcut)
+              if(-not $lnk.TargetPath -or -not(Test-Path -LiteralPath $lnk.TargetPath)){throw 'Desktop shortcut target invalid'}
+              if([IO.Path]::GetFileName($lnk.TargetPath) -ne 'Sokhna Port.exe'){throw "Desktop shortcut points to wrong target: $($lnk.TargetPath)"}
+            }
 
             # Seed real data so Excel validation checks content, not merely file creation.
             $now='2026-09-27T12:00:00Z'
@@ -428,6 +453,22 @@ jobs:
             $xlsx=@(Get-ChildItem -LiteralPath $excel.path -Recurse -Filter '*.xlsx' -File)
             if($xlsx.Count -lt 1){throw 'Excel Reports package contains no XLSX files'}
             foreach($x in $xlsx){if($x.Length -lt 1024){throw "Empty/invalid XLSX: $($x.FullName)"}}
+            $compatPy=Join-Path $env:RUNNER_TEMP 'check_xlsx_compat.py'
+            @'
+import sys, zipfile
+for p in sys.argv[1:]:
+    with zipfile.ZipFile(p,'r') as z:
+        for n in z.namelist():
+            if n.startswith('xl/worksheets/sheet') and n.endswith('.xml'):
+                t=z.read(n).decode('utf-8')
+                a=t.find('<autoFilter'); m=t.find('<mergeCells')
+                if a>=0 and m>=0 and a>m:
+                    raise SystemExit(f'autoFilter must precede mergeCells in EXE workbook: {p} / {n}')
+'@ | Set-Content -Encoding UTF8 $compatPy
+            foreach($x in $xlsx){
+              python $compatPy $x.FullName
+              if($LASTEXITCODE -ne 0){throw "Excel OOXML compatibility failed: $($x.FullName)"}
+            }
             $live=Invoke-RestMethod -Uri 'http://127.0.0.1:18766/api/refresh-live-excel' -Method Post -ContentType 'application/json' -Body '{}' -TimeoutSec 45
             if(-not $live.ok -or -not(Test-Path -LiteralPath $live.path)){throw 'Live Excel refresh failed'}
             if(-not $live.audit.verifiedAgainstSQLite){throw 'Live Excel SQLite audit failed'}
@@ -457,7 +498,7 @@ jobs:
       - name: Upload final EXE
         uses: actions/upload-artifact@v4
         with:
-          name: Sokhna-Port-2026-Final-v4.8.17.7
-          path: buildsrc/dist/Sokhna Port 2026 v4.8.17.7.exe
+          name: Sokhna-Port-2026-Final-v4.8.17.8
+          path: buildsrc/dist/Sokhna Port 2026 v4.8.17.8.exe
           if-no-files-found: error
           retention-days: 30
