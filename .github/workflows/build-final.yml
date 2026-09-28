@@ -377,7 +377,7 @@ jobs:
         shell: pwsh
         run: |
           Set-Location buildsrc
-          python -m PyInstaller --noconfirm --clean --onefile --windowed --name 'Sokhna Port 2026 v4.8.17.7' --add-data 'app;app' launcher.py
+          python -m PyInstaller --noconfirm --clean --onefile --windowed --name 'Sokhna Port 2026 v4.8.17.8' --add-data 'app;app' launcher.py
           if(-not(Test-Path 'dist/Sokhna Port 2026 v4.8.17.8.exe')){throw 'EXE was not created'}
           Get-FileHash 'dist/Sokhna Port 2026 v4.8.17.8.exe' -Algorithm SHA256
           Get-Item 'dist/Sokhna Port 2026 v4.8.17.8.exe' | Format-List Name,Length,LastWriteTime
