@@ -304,7 +304,7 @@ jobs:
               raise SystemExit('Missing build/v4177_bundle.b64')
           raw=base64.b64decode(src.read_text(encoding='utf-8').strip(), validate=True)
           digest=hashlib.sha256(raw).hexdigest()
-          expected='5b3cc0346ddcb5ff6e2490fac7ea51434b52c71b030283ac90c23d8bd3147a88'
+          expected='68db4e9b142aa51509553a63fbb8fab5375f46d788d3b0975e6d551d95364eaf'
           if digest != expected:
               raise SystemExit(f'v4.8.17.7 bundle SHA mismatch: {digest}')
           archive=Path('Sokhna-Port-v4.8.17.7-Storage-Sync-Reviewed.tar.xz')
