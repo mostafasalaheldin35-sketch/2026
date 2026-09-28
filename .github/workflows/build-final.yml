@@ -455,16 +455,16 @@ jobs:
             foreach($x in $xlsx){if($x.Length -lt 1024){throw "Empty/invalid XLSX: $($x.FullName)"}}
             $compatPy=Join-Path $env:RUNNER_TEMP 'check_xlsx_compat.py'
             @'
-import sys, zipfile
-for p in sys.argv[1:]:
-    with zipfile.ZipFile(p,'r') as z:
-        for n in z.namelist():
-            if n.startswith('xl/worksheets/sheet') and n.endswith('.xml'):
-                t=z.read(n).decode('utf-8')
-                a=t.find('<autoFilter'); m=t.find('<mergeCells')
-                if a>=0 and m>=0 and a>m:
-                    raise SystemExit(f'autoFilter must precede mergeCells in EXE workbook: {p} / {n}')
-'@ | Set-Content -Encoding UTF8 $compatPy
+            import sys, zipfile
+            for p in sys.argv[1:]:
+                with zipfile.ZipFile(p,'r') as z:
+                    for n in z.namelist():
+                        if n.startswith('xl/worksheets/sheet') and n.endswith('.xml'):
+                            t=z.read(n).decode('utf-8')
+                            a=t.find('<autoFilter'); m=t.find('<mergeCells')
+                            if a>=0 and m>=0 and a>m:
+                                raise SystemExit(f'autoFilter must precede mergeCells in EXE workbook: {p} / {n}')
+            '@ | Set-Content -Encoding UTF8 $compatPy
             foreach($x in $xlsx){
               python $compatPy $x.FullName
               if($LASTEXITCODE -ne 0){throw "Excel OOXML compatibility failed: $($x.FullName)"}
