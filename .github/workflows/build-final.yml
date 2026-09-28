@@ -32,6 +32,7 @@ on:
       - 'build/v4179c_03.b64'
       - 'build/v4179c_04.b64'
       - 'build/v4179_dashboard_fix.py'
+      - 'build/v4179_version_fix.py'
       - '.github/workflows/build-final.yml'
 
 permissions:
@@ -414,6 +415,8 @@ jobs:
           if($LASTEXITCODE -ne 0){throw 'apply_v4179.py failed'}
           python build/v4179_dashboard_fix.py
           if($LASTEXITCODE -ne 0){throw 'v4179 dashboard safety fix failed'}
+          python build/v4179_version_fix.py
+          if($LASTEXITCODE -ne 0){throw 'v4179 runtime version fix failed'}
           Copy-Item 'build/test_v4179.py' 'buildsrc/test_v4179.py' -Force
 
       - name: Install v4.8.17.9 Excel dependency
@@ -471,8 +474,8 @@ jobs:
             if($h.dataRoot -notmatch 'Sokhna Port Data'){throw "Data root is not canonical: $($h.dataRoot)"}
 
             $index=Invoke-WebRequest -Uri 'http://127.0.0.1:18766/app/index.html' -UseBasicParsing -TimeoutSec 5
-            if($index.StatusCode -ne 200 -or $index.Content -notmatch '4\.8\.17\.8-DESKTOP'){throw 'v4.8.17.8 index/version smoke failed'}
-            if($index.Content -notmatch 'v4177_patch\.js' -or $index.Content -notmatch 'v4177_patch\.css'){throw 'v4.8.17.7 storage UI assets missing'}
+            if($index.StatusCode -ne 200 -or $index.Content -notmatch '4\.8\.17\.9-DESKTOP'){throw 'v4.8.17.9 index/version smoke failed'}
+            if($index.Content -notmatch 'v4179_patch\.js' -or $index.Content -notmatch 'v4179_patch\.css'){throw 'v4.8.17.9 UI assets missing'}
 
             $sw=Invoke-WebRequest -Uri 'http://127.0.0.1:18766/app/sw.js' -UseBasicParsing -TimeoutSec 5
             if($sw.StatusCode -ne 200 -or $sw.Content -notmatch 'skipWaiting' -or $sw.Content -match 'caches\.'){throw 'Service Worker smoke failed'}
