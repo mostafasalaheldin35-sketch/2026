@@ -25,6 +25,7 @@ on:
       - 'build/apply_v4178.py'
       - 'build/test_v4178.py'
       - 'build/check_xlsx_compat.py'
+      - 'build/safe_a1_bundle.b64'
       - 'build/v4179_bundle.b64'
       - 'build/v4179c_00.b64'
       - 'build/v4179c_01.b64'
@@ -371,72 +372,95 @@ jobs:
           node --check buildsrc/app/v4177_patch.js
           python buildsrc/test_v4178.py
 
-      - name: Reconstruct v4.8.17.9 consolidated bundle
+      - name: Reconstruct SAFE-A1 UI/analytics bundle
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
           @'
           import base64, hashlib, tarfile
           from pathlib import Path
-          parts=[Path(f'build/v4179c_{i:02d}.b64') for i in range(5)]
-          for part in parts:
-              if not part.is_file():
-                  raise SystemExit(f'Missing {part}')
-          encoded=''.join(part.read_text(encoding='utf-8').strip() for part in parts)
-          raw=base64.b64decode(encoded, validate=True)
+          src=Path('build/safe_a1_bundle.b64')
+          if not src.is_file():
+              raise SystemExit('Missing build/safe_a1_bundle.b64')
+          raw=base64.b64decode(src.read_text(encoding='utf-8').strip(), validate=True)
           digest=hashlib.sha256(raw).hexdigest()
-          expected='0c2d0d8624d9e4d443c3218af2f2f53f384f685cc9e4dc38560661b640d95f36'
+          expected='07c100dbb812e439d88a945a1bb00e6fa1c7568ff3742f49d6dbd233b902b5eb'
           if digest != expected:
-              raise SystemExit(f'v4.8.17.9 bundle SHA mismatch: {digest}')
-          archive=Path('Sokhna-Port-v4.8.17.9-Consolidated.tgz')
+              raise SystemExit(f'SAFE-A1 bundle SHA mismatch: {digest}')
+          archive=Path('Sokhna-Port-v4.8.17.8-SAFE-A1.tgz')
           archive.write_bytes(raw)
-          out=Path('build/v4179')
+          out=Path('build/safe_a1')
           out.mkdir(parents=True,exist_ok=True)
           with tarfile.open(archive,'r:gz') as t:
               t.extractall(out)
-          for required in ('apply_v4179.py','test_v4179.py','v4179_backend_ext.py','v4179_patch.js','v4179_patch.css','sugar_template.b64'):
+          for required in ('apply_safe_a1.py','test_safe_a1.js','app/v4178_safe_logic.js','app/v4178_safe_patch.js','app/v4178_safe_patch.css'):
               if not (out/required).is_file():
-                  raise SystemExit(f'Missing v4179 payload file: {required}')
-          print('v4.8.17.9 consolidated bundle verified:', digest)
-          '@ | Set-Content -Encoding UTF8 build/reconstruct_v4179.py
-          python build/reconstruct_v4179.py
+                  raise SystemExit(f'Missing SAFE-A1 payload file: {required}')
+          print('SAFE-A1 bundle verified:', digest)
+          '@ | Set-Content -Encoding UTF8 build/reconstruct_safe_a1.py
+          python build/reconstruct_safe_a1.py
 
-      - name: Apply v4.8.17.9 consolidated changes
+      - name: Apply SAFE-A1 on approved v4.8.17.8
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
-          Copy-Item 'build/v4179/apply_v4179.py' 'build/apply_v4179.py' -Force
-          Copy-Item 'build/v4179/test_v4179.py' 'build/test_v4179.py' -Force
-          Copy-Item 'build/v4179/v4179_backend_ext.py' 'build/v4179_backend_ext.py' -Force
-          Copy-Item 'build/v4179/v4179_patch.js' 'build/v4179_patch.js' -Force
-          Copy-Item 'build/v4179/v4179_patch.css' 'build/v4179_patch.css' -Force
-          Copy-Item 'build/v4179/sugar_template.b64' 'build/sugar_template.b64' -Force
-          python build/apply_v4179.py
-          if($LASTEXITCODE -ne 0){throw 'apply_v4179.py failed'}
-          python build/v4179_dashboard_fix.py
-          if($LASTEXITCODE -ne 0){throw 'v4179 dashboard safety fix failed'}
-          python build/v4179_version_fix.py
-          if($LASTEXITCODE -ne 0){throw 'v4179 runtime version fix failed'}
-          Copy-Item 'build/test_v4179.py' 'buildsrc/test_v4179.py' -Force
+          $protected=@(
+            'buildsrc/backend.py',
+            'buildsrc/launcher.py',
+            'buildsrc/v4175_backend_ext.py',
+            'buildsrc/v4176_backend_ext.py',
+            'buildsrc/v4177_backend_ext.py',
+            'buildsrc/v4178_backend_ext.py',
+            'buildsrc/app/v4177_patch.js',
+            'buildsrc/app/v4177_patch.css'
+          )
+          $before=@{}
+          foreach($p in $protected){$before[$p]=(Get-FileHash $p -Algorithm SHA256).Hash}
+          python build/safe_a1/apply_safe_a1.py
+          if($LASTEXITCODE -ne 0){throw 'SAFE-A1 apply failed'}
+          foreach($p in $protected){
+            $after=(Get-FileHash $p -Algorithm SHA256).Hash
+            if($after -ne $before[$p]){throw "SAFE-A1 modified protected 17.8 file: $p"}
+          }
 
-      - name: Install v4.8.17.9 Excel dependency
-        run: python -m pip install --disable-pip-version-check openpyxl
-
-      - name: Final v4.8.17.9 QA
+      - name: SAFE-A1 source QA
         shell: pwsh
         env:
           PYTHONUTF8: '1'
           PYTHONIOENCODING: 'utf-8'
         run: |
           $ErrorActionPreference='Stop'
-          python -m py_compile buildsrc/backend.py buildsrc/launcher.py buildsrc/v4179_backend_ext.py buildsrc/test_v4179.py
-          node --check buildsrc/app/v4179_patch.js
-          python buildsrc/test_v4179.py
+          python -m py_compile buildsrc/backend.py buildsrc/launcher.py buildsrc/v4178_backend_ext.py
+          node --check buildsrc/app/v4178_safe_logic.js
+          node --check buildsrc/app/v4178_safe_patch.js
+          node build/safe_a1/test_safe_a1.js
+          python buildsrc/test_numbering_v4176.py
+          python buildsrc/test_v4178.py
+          @'
+          from pathlib import Path
+          import re
+          js=Path('buildsrc/app/v4178_safe_patch.js').read_text(encoding='utf-8')
+          css=Path('buildsrc/app/v4178_safe_patch.css').read_text(encoding='utf-8')
+          html=Path('buildsrc/app/index.html').read_text(encoding='utf-8')
+          for token in ('fetch(','desktopPost','/api/','renderSync','desktopManualBackup','desktopRefreshLiveExcel','start_idle_shutdown'):
+              if token in js:
+                  raise SystemExit(f'Forbidden service/sync token in SAFE-A1: {token}')
+          for token in ('#view-sync','.sync-'):
+              if token in css:
+                  raise SystemExit(f'Forbidden sync CSS token in SAFE-A1: {token}')
+          if not (html.index('v4177_patch.js') < html.index('v4178_safe_logic.js') < html.index('v4178_safe_patch.js')):
+              raise SystemExit('SAFE-A1 asset load order invalid')
+          scripts=re.findall(r'<script>(.*?)</script>',html,flags=re.I|re.S)
+          Path('buildsrc/app_check_safe_a1.js').write_text('\n'.join(x for x in scripts if x.strip()),encoding='utf-8')
+          print('SAFE-A1 integrity checks passed')
+          '@ | Set-Content -Encoding UTF8 build/safe_a1_integrity.py
+          python build/safe_a1_integrity.py
+          node --check buildsrc/app_check_safe_a1.js
 
       - name: Upload reviewed source snapshot
         uses: actions/upload-artifact@v4
         with:
-          name: reviewed-source-v4.8.17.9
+          name: reviewed-source-v4.8.17.8-SAFE-A1
           path: buildsrc
           if-no-files-found: error
           retention-days: 7
@@ -448,18 +472,18 @@ jobs:
         shell: pwsh
         run: |
           Set-Location buildsrc
-          python -m PyInstaller --noconfirm --clean --onefile --windowed --name 'Sokhna Port 2026 v4.8.17.9' --add-data 'app;app' launcher.py
-          if(-not(Test-Path 'dist/Sokhna Port 2026 v4.8.17.9.exe')){throw 'EXE was not created'}
-          Get-FileHash 'dist/Sokhna Port 2026 v4.8.17.9.exe' -Algorithm SHA256
-          Get-Item 'dist/Sokhna Port 2026 v4.8.17.9.exe' | Format-List Name,Length,LastWriteTime
+          python -m PyInstaller --noconfirm --clean --onefile --windowed --name 'Sokhna Port 2026 v4.8.17.8 SAFE-A1' --add-data 'app;app' launcher.py
+          if(-not(Test-Path 'dist/Sokhna Port 2026 v4.8.17.8 SAFE-A1.exe')){throw 'EXE was not created'}
+          Get-FileHash 'dist/Sokhna Port 2026 v4.8.17.8 SAFE-A1.exe' -Algorithm SHA256
+          Get-Item 'dist/Sokhna Port 2026 v4.8.17.8 SAFE-A1.exe' | Format-List Name,Length,LastWriteTime
 
-      - name: Smoke-test final EXE
+      - name: Smoke-test SAFE-A1 EXE
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
-          $qaParent=Join-Path $env:RUNNER_TEMP 'Sokhna2026SmokeParent'
+          $qaParent=Join-Path $env:RUNNER_TEMP 'SokhnaSafeA1Smoke'
           New-Item -ItemType Directory -Force $qaParent | Out-Null
-          $exe=Resolve-Path 'buildsrc/dist/Sokhna Port 2026 v4.8.17.9.exe'
+          $exe=Resolve-Path 'buildsrc/dist/Sokhna Port 2026 v4.8.17.8 SAFE-A1.exe'
           $p=Start-Process -FilePath $exe -ArgumentList @('--data-root',$qaParent,'--port','18766') -PassThru
           $ok=$false
           try {
@@ -467,97 +491,25 @@ jobs:
               Start-Sleep -Milliseconds 700
               try {
                 $h=Invoke-RestMethod -Uri 'http://127.0.0.1:18766/api/health' -TimeoutSec 2
-                if($h.ok -and $h.appVersion -eq '4.8.17.9-DESKTOP' -and $h.quickCheck -eq 'ok'){ $ok=$true; break }
+                if($h.ok -and $h.appVersion -eq '4.8.17.8-DESKTOP' -and $h.quickCheck -eq 'ok'){ $ok=$true; break }
               } catch {}
             }
-            if(-not $ok){throw 'Final EXE health smoke test failed'}
-            if($h.dataRoot -notmatch 'Sokhna Port Data'){throw "Data root is not canonical: $($h.dataRoot)"}
-
+            if(-not $ok){throw 'SAFE-A1 EXE health smoke failed'}
+            $ping=Invoke-RestMethod -Uri 'http://127.0.0.1:18766/api/ping' -TimeoutSec 5
+            if(-not $ping.ok){throw 'SAFE-A1 ping failed'}
             $index=Invoke-WebRequest -Uri 'http://127.0.0.1:18766/app/index.html' -UseBasicParsing -TimeoutSec 5
-            if($index.StatusCode -ne 200 -or $index.Content -notmatch '4\.8\.17\.9-DESKTOP'){throw 'v4.8.17.9 index/version smoke failed'}
-            if($index.Content -notmatch 'v4179_patch\.js' -or $index.Content -notmatch 'v4179_patch\.css'){throw 'v4.8.17.9 UI assets missing'}
-
-            $sw=Invoke-WebRequest -Uri 'http://127.0.0.1:18766/app/sw.js' -UseBasicParsing -TimeoutSec 5
-            if($sw.StatusCode -ne 200 -or $sw.Content -notmatch 'skipWaiting' -or $sw.Content -match 'caches\.'){throw 'Service Worker smoke failed'}
-            $fav=Invoke-WebRequest -Uri 'http://127.0.0.1:18766/favicon.ico' -UseBasicParsing -TimeoutSec 5 -SkipHttpErrorCheck
-            if($fav.StatusCode -ne 204){throw "favicon route should be quiet 204, got $($fav.StatusCode)"}
-
-            $patch176=Invoke-WebRequest -Uri 'http://127.0.0.1:18766/app/v4176_patch.js' -UseBasicParsing -TimeoutSec 5
-            foreach($token in @('companyItemStatusMulti','findingActualCompletionDate','reorderStore','restoreSelectedViewport')){
-              if($patch176.Content -notmatch [regex]::Escape($token)){throw "local v4.8.17.6 UI token missing: $token"}
+            if($index.StatusCode -ne 200 -or $index.Content -notmatch '4\.8\.17\.8-DESKTOP'){throw 'SAFE-A1 baseline version mismatch'}
+            foreach($asset in @('v4178_safe_logic.js','v4178_safe_patch.js','v4178_safe_patch.css')){
+              if($index.Content -notmatch [regex]::Escape($asset)){throw "SAFE-A1 asset missing from index: $asset"}
+              $r=Invoke-WebRequest -Uri ("http://127.0.0.1:18766/app/"+$asset) -UseBasicParsing -TimeoutSec 5
+              if($r.StatusCode -ne 200 -or $r.Content.Length -lt 100){throw "SAFE-A1 asset failed: $asset"}
             }
-            if($patch176.Content -notmatch "statusText:'مغلق'"){throw 'Closed NCR status still includes elapsed days'}
-
-            if(-not $h.excelRoot -or -not $h.backupsRoot -or -not $h.mobileExchangeRoot){throw 'Storage roots missing from health'}
-            $top=@(Get-ChildItem -LiteralPath $h.dataRoot -Directory | Select-Object -ExpandProperty Name | Sort-Object)
-            if(($top -join '|') -ne 'Attachments|Backup Recovery|Database|Excel|Logs|Mobile SQL Exchange'){throw "Storage root clutter remains: $($top -join ', ')"}
-
-            $desktop=[Environment]::GetFolderPath('Desktop')
-            if(-not $desktop){throw 'Windows Desktop path unavailable'}
-            $shortcut=Join-Path $desktop 'Sokhna Port.lnk'
-            $fallback=Join-Path $desktop 'Sokhna Port.cmd'
-            if(-not(Test-Path -LiteralPath $shortcut) -and -not(Test-Path -LiteralPath $fallback)){throw "Desktop launcher missing: $shortcut / $fallback"}
-            if(Test-Path -LiteralPath $shortcut){
-              $wsh=New-Object -ComObject WScript.Shell
-              $lnk=$wsh.CreateShortcut($shortcut)
-              if(-not $lnk.TargetPath -or -not(Test-Path -LiteralPath $lnk.TargetPath)){throw 'Desktop shortcut target invalid'}
-              if([IO.Path]::GetFileName($lnk.TargetPath) -ne 'Sokhna Port.exe'){throw "Desktop shortcut points to wrong target: $($lnk.TargetPath)"}
-            }
-
-            # Seed real data so Excel validation checks content, not merely file creation.
-            $now='2026-09-27T12:00:00Z'
-            $seed=@(
-              @{store='companies';row=@{id='c1';name='شركة اختبار EXE';companySerial=1;createdAt=$now;modifiedAt=$now}},
-              @{store='items';row=@{id='i1';companyId='c1';name='رخصة التشغيل';applicable=$true;position=1;expiryDate='2027-01-01';createdAt=$now;modifiedAt=$now}},
-              @{store='inspections';row=@{id='in1';companyId='c1';date='2026-09-27';inspectionCode='INS-1-2026-1';inspectionNo='INS-1-2026-1';createdAt=$now;modifiedAt=$now}},
-              @{store='findings';row=@{id='f1';inspectionId='in1';companyId='c1';no='1';description='ملاحظة اختبار';requirement='متطلب';status='Open';targetDate='2026-10-01';createdAt=$now;modifiedAt=$now}}
-            )
-            foreach($entry in $seed){
-              $body=@{store=$entry.store;row=$entry.row}|ConvertTo-Json -Depth 8 -Compress
-              $put=Invoke-RestMethod -Uri 'http://127.0.0.1:18766/api/put' -Method Post -ContentType 'application/json' -Body $body -TimeoutSec 10
-              if(-not $put.ok){throw "Seed failed: $($entry.store)"}
-            }
-
-            $excel=Invoke-RestMethod -Uri 'http://127.0.0.1:18766/api/manual-recovery' -Method Post -ContentType 'application/json' -Body '{}' -TimeoutSec 45
-            if(-not $excel.ok -or -not(Test-Path -LiteralPath $excel.path -PathType Container)){throw 'Manual Excel Reports package failed'}
-            if(-not $excel.audit.verifiedAgainstSQLite -or $excel.audit.excelFiles -lt 1){throw 'Manual Excel SQLite audit failed'}
-            $xlsx=@(Get-ChildItem -LiteralPath $excel.path -Recurse -Filter '*.xlsx' -File)
-            if($xlsx.Count -lt 1){throw 'Excel Reports package contains no XLSX files'}
-            foreach($x in $xlsx){if($x.Length -lt 1024){throw "Empty/invalid XLSX: $($x.FullName)"}}
-            foreach($x in $xlsx){
-              python build/check_xlsx_compat.py $x.FullName
-              if($LASTEXITCODE -ne 0){throw "Excel OOXML compatibility failed: $($x.FullName)"}
-            }
-            $live=Invoke-RestMethod -Uri 'http://127.0.0.1:18766/api/refresh-live-excel' -Method Post -ContentType 'application/json' -Body '{}' -TimeoutSec 45
-            if(-not $live.ok -or -not(Test-Path -LiteralPath $live.path -PathType Container)){throw 'Live Excel refresh failed'}
-            if(-not $live.audit.verifiedAgainstSQLite -or $live.audit.excelFiles -lt 1){throw 'Live Excel SQLite audit failed'}
-            $liveXlsx=@(Get-ChildItem -LiteralPath $live.path -Recurse -Filter '*.xlsx' -File)
-            if($liveXlsx.Count -lt 1){throw 'Live Excel folder contains no XLSX'}
-            foreach($x in $liveXlsx){
-              if($x.Length -lt 1024){throw "Empty Live XLSX: $($x.FullName)"}
-              python build/check_xlsx_compat.py $x.FullName
-              if($LASTEXITCODE -ne 0){throw "Live Excel OOXML compatibility failed: $($x.FullName)"}
-            }
-
-            $settings=Invoke-RestMethod -Uri 'http://127.0.0.1:18766/api/v4179-settings' -TimeoutSec 10
-            if(-not $settings.ok -or $settings.dailyRetentionDays -ne 30){throw 'v4.8.17.9 retention settings failed'}
-            $att=Invoke-RestMethod -Uri 'http://127.0.0.1:18766/api/attachment-index' -TimeoutSec 10
-            if(-not $att.ok -or -not $att.audit.path){throw 'Attachment index audit failed'}
-
-            $manual=Invoke-RestMethod -Uri 'http://127.0.0.1:18766/api/manual-backup' -Method Post -ContentType 'application/json' -Body '{}' -TimeoutSec 20
-            if(-not $manual.ok -or -not ($manual.path -match '\.sqlite$')){throw 'Manual SQLite backup failed'}
-            $body=@{path=$manual.path}|ConvertTo-Json -Compress
-            $verify=Invoke-RestMethod -Uri 'http://127.0.0.1:18766/api/verify-backup' -Method Post -ContentType 'application/json' -Body $body -TimeoutSec 15
-            if(-not $verify.ok -or -not $verify.valid){throw 'Backup verification failed'}
-            $preview=Invoke-RestMethod -Uri 'http://127.0.0.1:18766/api/backup-preview' -Method Post -ContentType 'application/json' -Body $body -TimeoutSec 15
-            if(-not $preview.ok){throw 'Restore preview failed'}
-            $restore=Invoke-RestMethod -Uri 'http://127.0.0.1:18766/api/restore-backup' -Method Post -ContentType 'application/json' -Body $body -TimeoutSec 20
-            if(-not $restore.ok -or -not(Test-Path -LiteralPath $restore.beforeRestore)){throw 'Restore / Before-Restore failed'}
-            $post=Invoke-RestMethod -Uri 'http://127.0.0.1:18766/api/health' -TimeoutSec 10
-            if(-not $post.ok -or $post.quickCheck -ne 'ok'){throw 'Post-restore health failed'}
-
-            $mobile=Invoke-RestMethod -Uri 'http://127.0.0.1:18766/api/mobile-export' -Method Post -ContentType 'application/json' -Body '{"since":"","includeAttachments":false}' -TimeoutSec 45
-            if(-not $mobile.ok -or -not(Test-Path -LiteralPath $mobile.path)){throw 'Mobile export failed'}
+            $now='2026-09-29T00:00:00Z'
+            $body=@{store='companies';row=@{id='safe-smoke-c1';name='شركة اختبار SAFE';companySerial=1;createdAt=$now;modifiedAt=$now}}|ConvertTo-Json -Depth 6 -Compress
+            $put=Invoke-RestMethod -Uri 'http://127.0.0.1:18766/api/put' -Method Post -ContentType 'application/json' -Body $body -TimeoutSec 10
+            if(-not $put.ok){throw 'SAFE-A1 store write failed'}
+            $get=Invoke-RestMethod -Uri 'http://127.0.0.1:18766/api/store/companies/safe-smoke-c1' -TimeoutSec 10
+            if($get.row.name -ne 'شركة اختبار SAFE'){throw 'SAFE-A1 store read failed'}
           } finally {
             if($p -and -not $p.HasExited){Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue}
           }
@@ -565,7 +517,7 @@ jobs:
       - name: Upload final EXE
         uses: actions/upload-artifact@v4
         with:
-          name: Sokhna-Port-2026-Final-v4.8.17.9
-          path: buildsrc/dist/Sokhna Port 2026 v4.8.17.9.exe
+          name: Sokhna-Port-2026-v4.8.17.8-SAFE-A1
+          path: buildsrc/dist/Sokhna Port 2026 v4.8.17.8 SAFE-A1.exe
           if-no-files-found: error
           retention-days: 30
