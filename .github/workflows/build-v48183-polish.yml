@@ -7,6 +7,7 @@ on:
       - chatgpt-v48183-polish
     paths:
       - 'build/apply_v48183_polish.py'
+      - 'build/apply_v48183_runtime_fix.py'
       - '.github/workflows/build-v48183-polish.yml'
 
 permissions:
@@ -57,6 +58,13 @@ jobs:
           $ErrorActionPreference='Stop'
           python build/apply_v48183_polish.py
           if($LASTEXITCODE -ne 0){throw 'v4.8.18.3 patch failed'}
+
+      - name: Apply v4.8.18.3 runtime stability fix
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          python build/apply_v48183_runtime_fix.py
+          if($LASTEXITCODE -ne 0){throw 'v4.8.18.3 runtime fix failed'}
 
       - name: Verify narrow change scope
         shell: pwsh
@@ -132,24 +140,10 @@ jobs:
         run: python buildsrc/test_v48183_live_excel.py
 
       - name: Live Excel UI regression
-        shell: pwsh
         env:
           PYTHONUTF8: '1'
           PYTHONIOENCODING: 'utf-8'
-        run: |
-          @'
-          from pathlib import Path
-          root=Path('buildsrc/app')
-          js=(root/'v48182_live_excel.js').read_text(encoding='utf-8')
-          css=(root/'v48182_live_excel.css').read_text(encoding='utf-8')
-          idx=(root/'index.html').read_text(encoding='utf-8')
-          for token in ('فتح فولدر Live Excel','تحديث Live Excel الآن','ورقتين فقط','البنود','التفتيشات','/api/open-live-excel-folder'):
-              assert token in js,token
-          assert 'v48182_live_excel.js' in idx and 'v48182_live_excel.css' in idx
-          assert '.s77-excel-card-48182 button' in css
-          print('v4.8.18.3 LIVE EXCEL UI STRUCTURE REGRESSION PASS')
-          '@ | Set-Content -Encoding UTF8 build/test_v48183_live_excel_ui_static.py
-          python build/test_v48183_live_excel_ui_static.py
+        run: python buildsrc/test_v48183_live_excel_ui.py
 
       - name: Core regression
         shell: pwsh
@@ -167,23 +161,11 @@ jobs:
           LOCALAPPDATA: ${{ runner.temp }}\Sokhna48183Http
         run: python buildsrc/test_v48183_http_adapted.py
 
-      - name: Existing UI structure regression
-        shell: pwsh
+      - name: Existing UI regression
         env:
           PYTHONUTF8: '1'
           PYTHONIOENCODING: 'utf-8'
-        run: |
-          @'
-          from pathlib import Path
-          app=Path('buildsrc/app')
-          idx=(app/'index.html').read_text(encoding='utf-8')
-          patch=(app/'v4179_patch.js').read_text(encoding='utf-8')
-          for token in ('id="view-dashboard"','data-nav="sync"','data-nav="dashboard"','id="view-inspection-analytics"','id="openInspectionAnalyticsBtn"'):
-              assert token in idx,token
-          assert 'analyticsCompanyFilter79' in patch
-          print('EXISTING UI STRUCTURE REGRESSION PASS')
-          '@ | Set-Content -Encoding UTF8 build/test_v48183_existing_ui_static.py
-          python build/test_v48183_existing_ui_static.py
+        run: python buildsrc/test_v48180_ui.py
 
       - name: Upload reviewed source snapshot
         uses: actions/upload-artifact@v4
