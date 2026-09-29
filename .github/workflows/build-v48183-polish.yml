@@ -1,0 +1,214 @@
+name: Build Sokhna Port 2026 v4.8.18.3 Polish
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - chatgpt-v48183-polish
+    paths:
+      - 'build/apply_v48183_polish.py'
+      - '.github/workflows/build-v48183-polish.yml'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  build-test-package:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Restore reviewed v4.8.18.2 source
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force buildsrc | Out-Null
+          gh run download 36533881922 -n reviewed-source-v4.8.18.2 -D buildsrc
+          if(-not(Test-Path 'buildsrc/backend.py')){throw 'v4.8.18.2 reviewed source was not restored'}
+          if(-not(Test-Path 'buildsrc/app/sugar_template.xlsx')){throw 'Approved Excel template missing'}
+          if(-not(Test-Path 'buildsrc/app/v48182_live_excel.js')){throw 'v4.8.18.2 source missing'}
+
+      - name: Snapshot reviewed source hashes
+        shell: pwsh
+        run: |
+          @'
+          from pathlib import Path
+          import hashlib,json
+          root=Path('buildsrc')
+          def sha(p):
+              h=hashlib.sha256();h.update(p.read_bytes());return h.hexdigest()
+          data={str(p.relative_to(root)).replace('\\','/'):sha(p) for p in root.rglob('*') if p.is_file() and '__pycache__' not in p.parts}
+          Path('build/v48183_before.json').write_text(json.dumps(data,indent=2),encoding='utf-8')
+          print('snapshotted',len(data),'files')
+          '@ | Set-Content -Encoding UTF8 build/snapshot_v48183.py
+          python build/snapshot_v48183.py
+
+      - name: Apply v4.8.18.3 polish only
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          python build/apply_v48183_polish.py
+          if($LASTEXITCODE -ne 0){throw 'v4.8.18.3 patch failed'}
+
+      - name: Verify narrow change scope
+        shell: pwsh
+        run: |
+          @'
+          from pathlib import Path
+          import hashlib,json
+          root=Path('buildsrc')
+          before=json.loads(Path('build/v48183_before.json').read_text(encoding='utf-8'))
+          def sha(p):
+              h=hashlib.sha256();h.update(p.read_bytes());return h.hexdigest()
+          after={str(p.relative_to(root)).replace('\\','/'):sha(p) for p in root.rglob('*') if p.is_file() and '__pycache__' not in p.parts}
+          allowed={'v4179_backend_ext.py','app/index.html','app/v2026_patch.js','app/v48183_polish.js','app/v48183_polish.css'}
+          changed={k for k in set(before)|set(after) if before.get(k)!=after.get(k)}
+          if changed != allowed:
+              raise SystemExit(f'Unexpected changed files: {sorted(changed)}')
+          template=root/'app'/'sugar_template.xlsx'
+          if hashlib.sha256(template.read_bytes()).hexdigest()!='55e2257b0362d58b62403816ea44bf02e7cfe0e643a189ff74b7b0ad0b11874d':
+              raise SystemExit('Approved Excel template changed')
+          print('Narrow-scope integrity PASS:',sorted(changed))
+          '@ | Set-Content -Encoding UTF8 build/verify_v48183_scope.py
+          python build/verify_v48183_scope.py
+
+      - name: Install QA dependencies
+        run: python -m pip install --disable-pip-version-check openpyxl playwright
+
+      - name: Static compile and requested-change QA
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          python -m py_compile buildsrc/backend.py buildsrc/launcher.py buildsrc/v4179_backend_ext.py
+          Get-ChildItem buildsrc/app -Filter '*.js' | ForEach-Object { node --check $_.FullName; if($LASTEXITCODE -ne 0){throw "JS syntax failed: $($_.Name)"} }
+          @'
+          from pathlib import Path
+          root=Path('buildsrc')
+          idx=(root/'app'/'index.html').read_text(encoding='utf-8')
+          js=(root/'app'/'v48183_polish.js').read_text(encoding='utf-8')
+          css=(root/'app'/'v48183_polish.css').read_text(encoding='utf-8')
+          v=(root/'app'/'v2026_patch.js').read_text(encoding='utf-8')
+          assert "const APP_VERSION='4.8.18.3-DESKTOP'" in idx
+          for token in ['ترتيب بيانات الشركة','data-v48183-company-order','فتح البنود','فتح التفتيشات','selectedDashboardCompanies','عرض كل الشركات','v48183ItemRow1','v48183ItemRow2']:
+              assert token in js,token
+          assert '#companiesList .company-list-actions button' in css
+          assert 'const saved=await silentSaveItem()' in v
+          print('v4.8.18.3 REQUESTED-CHANGE QA PASS')
+          '@ | Set-Content -Encoding UTF8 build/test_v48183_inline.py
+          python build/test_v48183_inline.py
+
+      - name: Adapt v4.8.18.2 QA to v4.8.18.3
+        shell: pwsh
+        run: |
+          @'
+          from pathlib import Path
+          root=Path('buildsrc')
+          for src,dst in [
+              ('test_v48182_live_excel.py','test_v48183_live_excel.py'),
+              ('test_v48182_live_excel_ui.py','test_v48183_live_excel_ui.py'),
+              ('test_v48182_core_adapted.py','test_v48183_core_adapted.py'),
+              ('test_v48182_http_adapted.py','test_v48183_http_adapted.py'),
+          ]:
+              s=(root/src).read_text(encoding='utf-8')
+              s=s.replace('4.8.18.2-DESKTOP','4.8.18.3-DESKTOP').replace('v4.8.18.2','v4.8.18.3')
+              (root/dst).write_text(s,encoding='utf-8')
+          '@ | Set-Content -Encoding UTF8 build/adapt_v48183_tests.py
+          python build/adapt_v48183_tests.py
+
+      - name: Live Excel regression
+        shell: pwsh
+        env:
+          PYTHONUTF8: '1'
+          PYTHONIOENCODING: 'utf-8'
+          LOCALAPPDATA: ${{ runner.temp }}\Sokhna48183Live
+        run: python buildsrc/test_v48183_live_excel.py
+
+      - name: Live Excel UI regression
+        env:
+          PYTHONUTF8: '1'
+          PYTHONIOENCODING: 'utf-8'
+        run: python buildsrc/test_v48183_live_excel_ui.py
+
+      - name: Core regression
+        shell: pwsh
+        env:
+          PYTHONUTF8: '1'
+          PYTHONIOENCODING: 'utf-8'
+          LOCALAPPDATA: ${{ runner.temp }}\Sokhna48183Core
+        run: python buildsrc/test_v48183_core_adapted.py
+
+      - name: HTTP regression
+        shell: pwsh
+        env:
+          PYTHONUTF8: '1'
+          PYTHONIOENCODING: 'utf-8'
+          LOCALAPPDATA: ${{ runner.temp }}\Sokhna48183Http
+        run: python buildsrc/test_v48183_http_adapted.py
+
+      - name: Existing UI regression
+        env:
+          PYTHONUTF8: '1'
+          PYTHONIOENCODING: 'utf-8'
+        run: python buildsrc/test_v48180_ui.py
+
+      - name: Upload reviewed source snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: reviewed-source-v4.8.18.3
+          path: buildsrc
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Install PyInstaller
+        run: python -m pip install --disable-pip-version-check pyinstaller
+
+      - name: Build Windows EXE
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          Set-Location buildsrc
+          python -m PyInstaller --noconfirm --clean --onefile --windowed --name 'Sokhna Port 2026 v4.8.18.3' --add-data 'app;app' launcher.py
+          if(-not(Test-Path 'dist/Sokhna Port 2026 v4.8.18.3.exe')){throw 'EXE was not created'}
+          Get-FileHash 'dist/Sokhna Port 2026 v4.8.18.3.exe' -Algorithm SHA256
+
+      - name: Smoke-test packaged EXE
+        shell: pwsh
+        env:
+          PYTHONUTF8: '1'
+          PYTHONIOENCODING: 'utf-8'
+          LOCALAPPDATA: ${{ runner.temp }}\Sokhna48183Exe
+        run: |
+          $ErrorActionPreference='Stop'
+          $qaParent=Join-Path $env:RUNNER_TEMP 'Sokhna48183SmokeParent'
+          New-Item -ItemType Directory -Force $qaParent | Out-Null
+          $exe=Resolve-Path 'buildsrc/dist/Sokhna Port 2026 v4.8.18.3.exe'
+          $p=Start-Process -FilePath $exe -ArgumentList @('--data-root',$qaParent,'--port','18767','--no-browser') -PassThru
+          try {
+            $h=$null
+            for($i=0;$i -lt 60;$i++){
+              Start-Sleep -Milliseconds 600
+              try {$h=Invoke-RestMethod -Uri 'http://127.0.0.1:18767/api/health' -TimeoutSec 2;if($h.ok){break}}catch{}
+            }
+            if(-not $h -or -not $h.ok){throw 'Packaged EXE health did not become ready'}
+            if($h.appVersion -ne '4.8.18.3-DESKTOP' -or $h.quickCheck -ne 'ok'){throw "Wrong EXE health/version: $($h.appVersion) / $($h.quickCheck)"}
+            python build/test_v48180_exe_ui.py 'http://127.0.0.1:18767/app/index.html'
+            if($LASTEXITCODE -ne 0){throw 'Packaged EXE UI regression failed'}
+          } finally {
+            if($p -and -not $p.HasExited){Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue}
+          }
+
+      - name: Upload final EXE
+        uses: actions/upload-artifact@v4
+        with:
+          name: Sokhna-Port-2026-Final-v4.8.18.3
+          path: buildsrc/dist/Sokhna Port 2026 v4.8.18.3.exe
+          if-no-files-found: error
+          retention-days: 30
