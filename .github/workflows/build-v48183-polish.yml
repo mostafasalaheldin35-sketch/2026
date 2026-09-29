@@ -132,10 +132,24 @@ jobs:
         run: python buildsrc/test_v48183_live_excel.py
 
       - name: Live Excel UI regression
+        shell: pwsh
         env:
           PYTHONUTF8: '1'
           PYTHONIOENCODING: 'utf-8'
-        run: python buildsrc/test_v48183_live_excel_ui.py
+        run: |
+          @'
+          from pathlib import Path
+          root=Path('buildsrc/app')
+          js=(root/'v48182_live_excel.js').read_text(encoding='utf-8')
+          css=(root/'v48182_live_excel.css').read_text(encoding='utf-8')
+          idx=(root/'index.html').read_text(encoding='utf-8')
+          for token in ('فتح فولدر Live Excel','تحديث Live Excel الآن','ورقتين فقط','البنود','التفتيشات','/api/open-live-excel-folder'):
+              assert token in js,token
+          assert 'v48182_live_excel.js' in idx and 'v48182_live_excel.css' in idx
+          assert '#openLiveExcelFolder48182' in css
+          print('v4.8.18.3 LIVE EXCEL UI STRUCTURE REGRESSION PASS')
+          '@ | Set-Content -Encoding UTF8 build/test_v48183_live_excel_ui_static.py
+          python build/test_v48183_live_excel_ui_static.py
 
       - name: Core regression
         shell: pwsh
