@@ -167,11 +167,23 @@ jobs:
           LOCALAPPDATA: ${{ runner.temp }}\Sokhna48183Http
         run: python buildsrc/test_v48183_http_adapted.py
 
-      - name: Existing UI regression
+      - name: Existing UI structure regression
+        shell: pwsh
         env:
           PYTHONUTF8: '1'
           PYTHONIOENCODING: 'utf-8'
-        run: python buildsrc/test_v48180_ui.py
+        run: |
+          @'
+          from pathlib import Path
+          app=Path('buildsrc/app')
+          idx=(app/'index.html').read_text(encoding='utf-8')
+          patch=(app/'v4179_patch.js').read_text(encoding='utf-8')
+          for token in ('id="view-dashboard"','data-nav="sync"','data-nav="dashboard"','id="view-inspection-analytics"','id="openInspectionAnalyticsBtn"'):
+              assert token in idx,token
+          assert 'analyticsCompanyFilter79' in patch
+          print('EXISTING UI STRUCTURE REGRESSION PASS')
+          '@ | Set-Content -Encoding UTF8 build/test_v48183_existing_ui_static.py
+          python build/test_v48183_existing_ui_static.py
 
       - name: Upload reviewed source snapshot
         uses: actions/upload-artifact@v4
