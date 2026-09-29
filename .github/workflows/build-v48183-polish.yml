@@ -146,7 +146,7 @@ jobs:
           for token in ('فتح فولدر Live Excel','تحديث Live Excel الآن','ورقتين فقط','البنود','التفتيشات','/api/open-live-excel-folder'):
               assert token in js,token
           assert 'v48182_live_excel.js' in idx and 'v48182_live_excel.css' in idx
-          assert '#openLiveExcelFolder48182' in css
+          assert '.s77-excel-card-48182 button' in css
           print('v4.8.18.3 LIVE EXCEL UI STRUCTURE REGRESSION PASS')
           '@ | Set-Content -Encoding UTF8 build/test_v48183_live_excel_ui_static.py
           python build/test_v48183_live_excel_ui_static.py
