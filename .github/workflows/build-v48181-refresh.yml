@@ -1,0 +1,205 @@
+name: Build Sokhna Port 2026 v4.8.18.1 Refresh
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'build/apply_v48181_refresh.py'
+      - 'build/test_v48181_refresh.py'
+      - 'build/test_v48181_refresh_ui.py'
+      - 'build/test_v48181_exe_refresh.py'
+      - '.github/workflows/build-v48181-refresh.yml'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  build-test-package:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Restore Codex reviewed v4.8.18.0 source
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force buildsrc | Out-Null
+          gh run download 36486045609 -n reviewed-source-v4.8.18.0 -D buildsrc
+          if(-not(Test-Path 'buildsrc/backend.py')){throw 'v4.8.18.0 reviewed source was not restored'}
+          if(-not(Test-Path 'buildsrc/app/v4179_patch.js')){throw 'v4.8.18.0 UI patch missing'}
+          if(-not(Test-Path 'buildsrc/test_v48180.py')){throw 'v4.8.18.0 tests missing'}
+
+      - name: Snapshot Codex source hashes
+        shell: pwsh
+        run: |
+          @'
+          from pathlib import Path
+          import hashlib,json
+          root=Path('buildsrc')
+          def sha(p):
+              h=hashlib.sha256();h.update(p.read_bytes());return h.hexdigest()
+          data={str(p.relative_to(root)).replace('\\','/'):sha(p) for p in root.rglob('*') if p.is_file() and '__pycache__' not in p.parts}
+          Path('build/v48181_before.json').write_text(json.dumps(data,indent=2),encoding='utf-8')
+          print('snapshotted',len(data),'files')
+          '@ | Set-Content -Encoding UTF8 build/snapshot_v48181.py
+          python build/snapshot_v48181.py
+
+      - name: Apply refresh-only v4.8.18.1
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          python build/apply_v48181_refresh.py
+          if($LASTEXITCODE -ne 0){throw 'refresh-only patch failed'}
+
+      - name: Verify only refresh files changed
+        shell: pwsh
+        run: |
+          @'
+          from pathlib import Path
+          import hashlib,json
+          root=Path('buildsrc')
+          before=json.loads(Path('build/v48181_before.json').read_text(encoding='utf-8'))
+          def sha(p):
+              h=hashlib.sha256();h.update(p.read_bytes());return h.hexdigest()
+          after={str(p.relative_to(root)).replace('\\','/'):sha(p) for p in root.rglob('*') if p.is_file() and '__pycache__' not in p.parts}
+          allowed={'v4179_backend_ext.py','app/index.html','app/v48181_refresh.js'}
+          changed={k for k in set(before)|set(after) if before.get(k)!=after.get(k)}
+          if changed != allowed:
+              raise SystemExit(f'Unexpected changed files: {sorted(changed)}')
+          print('Refresh-only integrity PASS:',sorted(changed))
+          '@ | Set-Content -Encoding UTF8 build/verify_v48181_scope.py
+          python build/verify_v48181_scope.py
+
+      - name: Install QA dependencies
+        run: python -m pip install --disable-pip-version-check openpyxl playwright
+
+      - name: Static compile and syntax QA
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          python -m py_compile buildsrc/backend.py buildsrc/launcher.py buildsrc/v4179_backend_ext.py build/test_v48181_refresh.py
+          Get-ChildItem buildsrc/app -Filter '*.js' | ForEach-Object { node --check $_.FullName; if($LASTEXITCODE -ne 0){throw "JS syntax failed: $($_.Name)"} }
+
+      - name: Refresh-only backend QA
+        env:
+          PYTHONUTF8: '1'
+          PYTHONIOENCODING: 'utf-8'
+        run: python build/test_v48181_refresh.py
+
+      - name: Re-run Codex core regression on v4.8.18.1
+        shell: pwsh
+        env:
+          PYTHONUTF8: '1'
+          PYTHONIOENCODING: 'utf-8'
+        run: |
+          @'
+          from pathlib import Path
+          s=Path('buildsrc/test_v48180.py').read_text(encoding='utf-8')
+          s=s.replace("'4.8.18.0-DESKTOP'","'4.8.18.1-DESKTOP'")
+          s=s.replace("assert fake.stopped.wait(2.5),'idle shutdown did not recover stale instance'","assert not fake.stopped.wait(2.5),'service must not shut down from heartbeat timing gaps'")
+          s=s.replace("v4.8.18.0 CORE/STORAGE/EXCEL/BACKUP/MOBILE/CONCURRENCY/RECOVERY QA PASS","v4.8.18.1 CORE REGRESSION QA PASS")
+          Path('buildsrc/test_v48181_core_adapted.py').write_text(s,encoding='utf-8')
+          '@ | Set-Content -Encoding UTF8 build/adapt_core_v48181.py
+          python build/adapt_core_v48181.py
+          python buildsrc/test_v48181_core_adapted.py
+
+      - name: Re-run Codex HTTP regression on v4.8.18.1
+        shell: pwsh
+        env:
+          PYTHONUTF8: '1'
+          PYTHONIOENCODING: 'utf-8'
+        run: |
+          @'
+          from pathlib import Path
+          s=Path('buildsrc/test_v48180_http.py').read_text(encoding='utf-8')
+          s=s.replace("'4.8.18.0-DESKTOP'","'4.8.18.1-DESKTOP'")
+          s=s.replace("b'4.8.18.0-DESKTOP'","b'4.8.18.1-DESKTOP'")
+          s=s.replace("v4.8.18.0 HTTP/API/CONCURRENCY/EXCEL/BACKUP/RESTORE/MOBILE QA PASS","v4.8.18.1 HTTP REGRESSION QA PASS")
+          Path('buildsrc/test_v48181_http_adapted.py').write_text(s,encoding='utf-8')
+          '@ | Set-Content -Encoding UTF8 build/adapt_http_v48181.py
+          python build/adapt_http_v48181.py
+          python buildsrc/test_v48181_http_adapted.py
+
+      - name: Re-run Codex browser freeze regression
+        env:
+          PYTHONUTF8: '1'
+          PYTHONIOENCODING: 'utf-8'
+        run: python buildsrc/test_v48180_ui.py
+
+      - name: Auto-reconnect browser QA
+        env:
+          PYTHONUTF8: '1'
+          PYTHONIOENCODING: 'utf-8'
+        run: python build/test_v48181_refresh_ui.py
+
+      - name: Upload reviewed source snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: reviewed-source-v4.8.18.1
+          path: buildsrc
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Install PyInstaller
+        run: python -m pip install --disable-pip-version-check pyinstaller
+
+      - name: Build Windows EXE
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          Set-Location buildsrc
+          python -m PyInstaller --noconfirm --clean --onefile --windowed --name 'Sokhna Port 2026 v4.8.18.1' --add-data 'app;app' launcher.py
+          if(-not(Test-Path 'dist/Sokhna Port 2026 v4.8.18.1.exe')){throw 'EXE was not created'}
+          Get-FileHash 'dist/Sokhna Port 2026 v4.8.18.1.exe' -Algorithm SHA256
+          Get-Item 'dist/Sokhna Port 2026 v4.8.18.1.exe' | Format-List Name,Length,LastWriteTime
+
+      - name: Smoke-test packaged EXE and refresh behavior
+        shell: pwsh
+        env:
+          PYTHONUTF8: '1'
+          PYTHONIOENCODING: 'utf-8'
+        run: |
+          $ErrorActionPreference='Stop'
+          $qaParent=Join-Path $env:RUNNER_TEMP 'Sokhna48181SmokeParent'
+          New-Item -ItemType Directory -Force $qaParent | Out-Null
+          $exe=Resolve-Path 'buildsrc/dist/Sokhna Port 2026 v4.8.18.1.exe'
+          $env:SOKHNA_IDLE_SHUTDOWN_SECONDS='1'
+          $p=Start-Process -FilePath $exe -ArgumentList @('--data-root',$qaParent,'--port','18766','--no-browser') -PassThru
+          try {
+            $h=$null
+            for($i=0;$i -lt 60;$i++){
+              Start-Sleep -Milliseconds 600
+              try {$h=Invoke-RestMethod -Uri 'http://127.0.0.1:18766/api/health' -TimeoutSec 2;if($h.ok){break}}catch{}
+            }
+            if(-not $h -or -not $h.ok){throw 'Packaged EXE health did not become ready'}
+            if($h.appVersion -ne '4.8.18.1-DESKTOP' -or $h.quickCheck -ne 'ok'){throw "Wrong EXE health/version: $($h.appVersion) / $($h.quickCheck)"}
+            $ping=Invoke-RestMethod -Uri 'http://127.0.0.1:18766/api/ping' -TimeoutSec 5
+            if(-not $ping.ok){throw 'Heartbeat ping failed'}
+            Start-Sleep -Seconds 3
+            if($p.HasExited){throw 'EXE exited because of heartbeat timing gap'}
+            $after=Invoke-RestMethod -Uri 'http://127.0.0.1:18766/api/health' -TimeoutSec 5
+            if(-not $after.ok){throw 'EXE health failed after simulated stale heartbeat gap'}
+            python build/test_v48180_exe_ui.py 'http://127.0.0.1:18766/app/index.html'
+            if($LASTEXITCODE -ne 0){throw 'Codex packaged EXE UI regression failed'}
+            python build/test_v48181_exe_refresh.py 'http://127.0.0.1:18766/app/index.html'
+            if($LASTEXITCODE -ne 0){throw 'Packaged EXE refresh regression failed'}
+          } finally {
+            Remove-Item Env:SOKHNA_IDLE_SHUTDOWN_SECONDS -ErrorAction SilentlyContinue
+            if($p -and -not $p.HasExited){Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue}
+          }
+
+      - name: Upload final EXE
+        uses: actions/upload-artifact@v4
+        with:
+          name: Sokhna-Port-2026-Final-v4.8.18.1
+          path: buildsrc/dist/Sokhna Port 2026 v4.8.18.1.exe
+          if-no-files-found: error
+          retention-days: 30
