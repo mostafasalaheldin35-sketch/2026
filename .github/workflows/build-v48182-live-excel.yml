@@ -117,7 +117,7 @@ jobs:
         run: |
           @'
           from pathlib import Path
-          s=Path('buildsrc/test_v48181_core.py').read_text(encoding='utf-8')
+          s=Path('buildsrc/test_v48181_core_adapted.py').read_text(encoding='utf-8')
           s=s.replace("'4.8.18.1-DESKTOP'","'4.8.18.2-DESKTOP'")
           s=s.replace("const APP_VERSION='4.8.18.1-DESKTOP'","const APP_VERSION='4.8.18.2-DESKTOP'")
           s=s.replace("v4.8.18.1 CORE + NO-IDLE-SHUTDOWN QA PASS","v4.8.18.2 CORE REGRESSION QA PASS")
@@ -135,7 +135,7 @@ jobs:
         run: |
           @'
           from pathlib import Path
-          s=Path('buildsrc/test_v48181_http.py').read_text(encoding='utf-8')
+          s=Path('buildsrc/test_v48181_http_adapted.py').read_text(encoding='utf-8')
           s=s.replace("'4.8.18.1-DESKTOP'","'4.8.18.2-DESKTOP'")
           s=s.replace("b'4.8.18.1-DESKTOP'","b'4.8.18.2-DESKTOP'")
           s=s.replace("v4.8.18.1 HTTP/API QA PASS","v4.8.18.2 HTTP/API REGRESSION QA PASS")
@@ -221,7 +221,7 @@ jobs:
           '@ | Set-Content -Encoding UTF8 build/check_live_workbook.py
             python build/check_live_workbook.py $xlsx
             if($LASTEXITCODE -ne 0){throw 'Packaged Live workbook content check failed'}
-            python buildsrc/test_v48180_exe_ui.py 'http://127.0.0.1:18766/app/index.html'
+            python build/test_v48180_exe_ui.py 'http://127.0.0.1:18766/app/index.html'
             if($LASTEXITCODE -ne 0){throw 'Codex packaged EXE UI regression failed'}
           } finally {
             if($p -and -not $p.HasExited){Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue}
