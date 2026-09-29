@@ -1,0 +1,8 @@
+/* v4.8.18.2 — Live Excel controls only. */
+#view-sync .s77-excel-card-48182 button{min-height:42px!important;white-space:normal!important;overflow:visible!important;line-height:1.35!important;font-size:13px!important;font-weight:600!important;opacity:1!important;text-indent:0!important}
+#view-sync .s77-excel-card-48182 button.outline{background:#fff!important;color:#145f96!important;border-color:#8fb8d8!important}
+#view-sync .s77-excel-card-48182 button.outline:hover{background:#f2f8fc!important;color:#0b4f80!important}
+#view-sync .s77-excel-card-48182 button.primary{color:#fff!important}
+#view-sync .s77-excel-card-48182 button:disabled{opacity:.62!important;cursor:wait!important}
+#view-sync .live-excel-note-48182{margin-top:4px;line-height:1.7;background:#f7fbff;border:1px solid #d8e9f6;border-radius:9px;padding:9px;color:#475467}
+#view-sync .live-excel-note-48182 b{color:#1d4f78}
